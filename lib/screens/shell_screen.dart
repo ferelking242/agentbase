@@ -9,6 +9,7 @@ import 'dashboard_screen.dart';
 import 'home_screen.dart';
 import 'notifications_screen.dart';
 import 'openspace_screen.dart';
+import 'room_detail_screen.dart';
 import 'rooms_screen.dart';
 import 'prompts_screen.dart';
 import 'search_screen.dart';
@@ -73,7 +74,14 @@ class _ShellScreenState extends State<ShellScreen> {
   void _navigateToRooms() {
     Navigator.pop(context);
     Navigator.push(context, MaterialPageRoute(
-      builder: (_) => RoomsScreen(github: widget.github),
+      builder: (_) => RoomsScreen(
+        github: widget.github,
+        onRoomSelected: (room) {
+          Navigator.push(context, MaterialPageRoute(
+            builder: (_) => RoomDetailScreen(room: room, github: widget.github),
+          ));
+        },
+      ),
     ));
   }
 
