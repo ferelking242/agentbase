@@ -678,18 +678,18 @@ class _HomeScreenState extends State<HomeScreen> {
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-        decoration: const BoxDecoration(color: kBg, border: Border(top: BorderSide(color: kBorder, width: 0.5))),
+        color: kBg,
         child: Container(
           decoration: BoxDecoration(
             color: kCard,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(28),
             border: Border.all(color: kBorder, width: 0.5),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             // Images inside the box (like ChatGPT)
             if (_files.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                 child: SizedBox(
                   height: 76,
                   child: ListView.separated(
@@ -714,17 +714,18 @@ class _HomeScreenState extends State<HomeScreen> {
                 hintText: 'Écris ton prompt… ou tape @ ou @@',
                 hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
                 border: InputBorder.none,
-                contentPadding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+                contentPadding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
                 isDense: true,
               ),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
               child: Row(children: [
                 _ToolBtn(icon: Icons.add, onTap: _showAttachMenu, tooltip: 'Joindre'),
-                _ToolBtn(icon: Icons.open_in_full_rounded, onTap: _openFullscreen, tooltip: 'Plein écran'),
                 _ToolBtn(icon: Icons.auto_awesome_outlined, onTap: _showTemplates, tooltip: 'Templates'),
                 const Spacer(),
+                _ToolBtn(icon: Icons.open_in_full_rounded, onTap: _openFullscreen, tooltip: 'Plein écran'),
+                const SizedBox(width: 4),
                 GestureDetector(
                   onTap: hasContent ? _send : null,
                   child: AnimatedContainer(
@@ -732,7 +733,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     width: 34, height: 34,
                     decoration: BoxDecoration(
                       color: hasContent ? kAccent : kCard2,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(17),
                       border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
                     ),
                     child: Icon(Icons.arrow_upward_rounded, size: 18, color: hasContent ? Colors.white : kMuted2),
