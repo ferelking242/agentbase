@@ -238,7 +238,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
         return _RoomCard(
           room: room,
           isPinned: _pinned.contains(room.id),
-          onTap: () { widget.onRoomSelected?.call(room); Navigator.pop(context); },
+          onTap: () { Navigator.pop(context); widget.onRoomSelected?.call(room); },
           onPin: () => _togglePin(room),
         );
       },
