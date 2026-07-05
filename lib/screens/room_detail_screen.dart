@@ -220,7 +220,9 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
       ],
       body: TabBarView(controller: _tab, children: [
         _AccueilTab(room: widget.room, context2: _context, rules: _rulesList, github: widget.github,
-          onNavigate: (i) => _tab.animateTo(i)),
+          onNavigate: (i) => _tab.animateTo(i),
+          onPromptSent: (lp) => setState(() => _prompts.insert(0, lp)),
+          onSnack: (msg, c) => showAppSnack(context, msg, color: c)),
         _ContexteTab(content: _context, loading: _ctxLoading, saving: _ctxSaving, onSave: _saveContext),
         _ReglesTab(
           rules: _rulesList, loading: _rulesLoading, saving: _rulesSaving, dirty: _rulesDirty,
@@ -251,21 +253,60 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
 }
 
 // ─── Tab 0: Accueil ───────────────────────────────────────────────────────────
-class _AccueilTab extends StatelessWidget {
+class _AccueilTab extends StatefulWidget {
   final Room room;
   final String? context2;
   final List<String> rules;
   final GitHubService github;
   final ValueChanged<int> onNavigate;
-  const _AccueilTab({required this.room, this.context2, required this.rules, required this.github, required this.onNavigate});
+  final ValueChanged<_LocalPrompt> onPromptSent;
+  final void Function(String, Color) onSnack;
+  const _AccueilTab({required this.room, this.context2, required this.rules, required this.github,
+      required this.onNavigate, required this.onPromptSent, required this.onSnack});
+
+  @override
+  State<_AccueilTab> createState() => _AccueilTabState();
+}
+
+class _AccueilTabState extends State<_AccueilTab> {
+  final _ctrl = TextEditingController();
+  bool _sending = false;
+
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
 
   void _openUrl(String url) async {
     try { await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
   }
 
+  Future<void> _send() async {
+    final t = _ctrl.text.trim();
+    if (t.isEmpty) return;
+    if (!widget.github.hasPat) { widget.onSnack('Token GitHub requis', kYellow); return; }
+    setState(() => _sending = true);
+    try {
+      final ts = DateTime.now().millisecondsSinceEpoch.toString();
+      final words = t.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+      final name = words.take(8).join(' ');
+      final prompt = AgentPrompt(id: ts, number: 0, roomId: widget.room.id, text: t, status: 'pending', name: name, createdAt: DateTime.now());
+      await widget.github.pushPrompt(widget.room.id, prompt);
+      final lp = _LocalPrompt(id: ts, name: name, text: t, status: 'pending', createdAt: prompt.createdAt);
+      _ctrl.clear();
+      if (mounted) setState(() => _sending = false);
+      widget.onPromptSent(lp);
+      widget.onSnack('Prompt ajouté', kGreen);
+    } catch (e) {
+      if (mounted) { setState(() => _sending = false); widget.onSnack('Erreur: $e', kRed); }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final room = widget.room;
+    final rules = widget.rules;
+    final context2 = widget.context2;
+    final onNavigate = widget.onNavigate;
     final accent = room.accentColor;
+    final hasContent = _ctrl.text.trim().isNotEmpty;
 
     return ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 40), children: [
       // ── Hero ──────────────────────────────────────────────────────────────
@@ -294,6 +335,50 @@ class _AccueilTab extends StatelessWidget {
         ],
       ])),
       const SizedBox(height: 20),
+
+      // ── Zone de prompt rapide ────────────────────────────────────────────
+      Container(
+        decoration: BoxDecoration(
+          color: kCard,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: kBorder, width: 0.5),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 4, 6, 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(child: TextField(
+            controller: _ctrl,
+            minLines: 1, maxLines: 5,
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _send(),
+            style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.4),
+            cursorColor: kAccent,
+            decoration: InputDecoration(
+              hintText: 'Envoyer un prompt à ${room.name}…',
+              hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
+              border: InputBorder.none,
+              contentPadding: const EdgeInsets.symmetric(vertical: 10),
+            ),
+          )),
+          const SizedBox(width: 6),
+          GestureDetector(
+            onTap: (hasContent && !_sending) ? _send : null,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 34, height: 34,
+              margin: const EdgeInsets.only(bottom: 4),
+              decoration: BoxDecoration(
+                color: hasContent ? accent : kCard2,
+                shape: BoxShape.circle,
+                border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
+              ),
+              child: _sending
+                  ? const Center(child: SizedBox(width: 13, height: 13, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
+                  : Icon(Icons.arrow_upward_rounded, size: 16, color: hasContent ? Colors.white : kMuted2),
+            ),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 16),
 
       // ── Stats ─────────────────────────────────────────────────────────────
       AppCard(
