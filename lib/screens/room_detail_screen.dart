@@ -44,6 +44,7 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
   bool _ctxLoading = true, _rulesLoading = true, _chatLoading = true;
   bool _promptLoading = true, _transcriptLoading = true;
   bool _rulesSaving = false, _rulesDirty = false;
+  bool _ctxSaving = false;
 
   @override
   void initState() {
@@ -136,9 +137,25 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
     }
   }
 
+  Future<void> _saveContext(String content) async {
+    if (!widget.github.hasPat) { showAppSnack(context, 'Token GitHub requis', color: kYellow); return; }
+    setState(() => _ctxSaving = true);
+    try {
+      await widget.github.pushContext(widget.room.id, content);
+      if (mounted) { setState(() { _context = content; _ctxSaving = false; }); showAppSnack(context, 'Contexte sauvegardé'); }
+    } catch (e) {
+      if (mounted) { setState(() => _ctxSaving = false); showAppSnack(context, 'Erreur: $e', isError: true); }
+    }
+  }
+
+  void _openUrl(String url) async {
+    try { await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final accent = widget.room.accentColor;
+    final projectUrl = widget.room.githubUrl ?? 'https://github.com/${widget.github.owner}/${widget.github.repo}/tree/main/rooms/${widget.room.id}';
     return NestedScrollView(
       headerSliverBuilder: (ctx, _) => [
         SliverAppBar(
@@ -160,6 +177,16 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
               overflow: TextOverflow.ellipsis)),
           ]),
           centerTitle: true,
+          actions: [
+            GestureDetector(
+              onTap: () => _openUrl(projectUrl),
+              child: Padding(padding: const EdgeInsets.only(right: 14, top: 10, bottom: 10), child: Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+                child: const Icon(Icons.code_rounded, size: 16, color: kMuted),
+              )),
+            ),
+          ],
           bottom: PreferredSize(
             preferredSize: const Size.fromHeight(44),
             child: Container(
@@ -192,8 +219,9 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
         ),
       ],
       body: TabBarView(controller: _tab, children: [
-        _AccueilTab(room: widget.room, context2: _context, rules: _rulesList, github: widget.github),
-        _ContexteTab(content: _context, loading: _ctxLoading),
+        _AccueilTab(room: widget.room, context2: _context, rules: _rulesList, github: widget.github,
+          onNavigate: (i) => _tab.animateTo(i)),
+        _ContexteTab(content: _context, loading: _ctxLoading, saving: _ctxSaving, onSave: _saveContext),
         _ReglesTab(
           rules: _rulesList, loading: _rulesLoading, saving: _rulesSaving, dirty: _rulesDirty,
           onAdd: (r) => setState(() { _rulesList.add(r); _rulesDirty = true; }),
@@ -228,7 +256,8 @@ class _AccueilTab extends StatelessWidget {
   final String? context2;
   final List<String> rules;
   final GitHubService github;
-  const _AccueilTab({required this.room, this.context2, required this.rules, required this.github});
+  final ValueChanged<int> onNavigate;
+  const _AccueilTab({required this.room, this.context2, required this.rules, required this.github, required this.onNavigate});
 
   void _openUrl(String url) async {
     try { await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
@@ -237,7 +266,6 @@ class _AccueilTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = room.accentColor;
-    final projectUrl = room.githubUrl ?? 'https://github.com/${github.owner}/${github.repo}/tree/main/rooms/${room.id}';
 
     return ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 40), children: [
       // ── Hero ──────────────────────────────────────────────────────────────
@@ -280,18 +308,25 @@ class _AccueilTab extends StatelessWidget {
       ),
       const SizedBox(height: 16),
 
-      // ── GitHub links ──────────────────────────────────────────────────────
-      const _SectionLabel('LIENS GITHUB'),
+      // ── Quick actions ─────────────────────────────────────────────────────
+      const _SectionLabel('ACTIONS RAPIDES'),
       const SizedBox(height: 8),
-      _LinkCard(
-        icon: Icons.code_rounded,
-        title: room.name,
-        subtitle: projectUrl.replaceFirst('https://github.com/', ''),
-        color: accent,
-        onTap: () => _openUrl(projectUrl),
-      ),
+      Row(children: [
+        Expanded(child: _QuickAction(icon: Icons.chat_bubble_outline, label: 'Chat', color: accent, onTap: () => onNavigate(3))),
+        const SizedBox(width: 10),
+        Expanded(child: _QuickAction(icon: Icons.description_outlined, label: 'Transcrire', color: accent, onTap: () => onNavigate(4))),
+      ]),
+      const SizedBox(height: 10),
+      Row(children: [
+        Expanded(child: _QuickAction(icon: Icons.rule_rounded, label: 'Règles', color: accent, onTap: () => onNavigate(2))),
+        const SizedBox(width: 10),
+        Expanded(child: _QuickAction(icon: Icons.notes_rounded, label: 'Contexte', color: accent, onTap: () => onNavigate(1))),
+      ]),
+      const SizedBox(height: 20),
+
       if (room.linkedRepos.isNotEmpty) ...[
-        const SizedBox(height: 6),
+        const _SectionLabel('REPOS LIÉS'),
+        const SizedBox(height: 8),
         ...room.linkedRepos.map((url) {
           final parts = url.replaceFirst('https://github.com/', '').split('/');
           final repoName = parts.length >= 2 ? parts[1] : url;
@@ -306,8 +341,8 @@ class _AccueilTab extends StatelessWidget {
             ),
           );
         }),
+        const SizedBox(height: 16),
       ],
-      const SizedBox(height: 16),
 
       // ── Context preview ───────────────────────────────────────────────────
       if (context2 != null && context2!.isNotEmpty) ...[
@@ -354,6 +389,29 @@ class _AccueilTab extends StatelessWidget {
       ],
     ]);
   }
+}
+
+class _QuickAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickAction({required this.icon, required this.label, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: AppCard(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+      child: Row(children: [
+        Container(width: 30, height: 30,
+          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+          child: Icon(icon, size: 15, color: color)),
+        const SizedBox(width: 10),
+        Expanded(child: Text(label, style: GoogleFonts.inter(color: kText, fontSize: 13, fontWeight: FontWeight.w600))),
+      ]),
+    ),
+  );
 }
 
 class _Chip extends StatelessWidget {
@@ -419,23 +477,111 @@ class _SectionLabel extends StatelessWidget {
 }
 
 // ─── Tab 1: Contexte ──────────────────────────────────────────────────────────
-class _ContexteTab extends StatelessWidget {
+class _ContexteTab extends StatefulWidget {
   final String? content;
-  final bool loading;
-  const _ContexteTab({this.content, required this.loading});
+  final bool loading, saving;
+  final Future<void> Function(String) onSave;
+  const _ContexteTab({this.content, required this.loading, required this.saving, required this.onSave});
+  @override State<_ContexteTab> createState() => _ContexteTabState();
+}
+
+class _ContexteTabState extends State<_ContexteTab> {
+  bool _editing = false;
+  late TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.content ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContexteTab old) {
+    super.didUpdateWidget(old);
+    if (!_editing && old.content != widget.content) _ctrl.text = widget.content ?? '';
+  }
+
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Future<void> _save() async {
+    await widget.onSave(_ctrl.text.trim());
+    if (mounted) setState(() => _editing = false);
+  }
+
+  void _cancel() {
+    _ctrl.text = widget.content ?? '';
+    setState(() => _editing = false);
+  }
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const AppLoadingIndicator();
-    if (content == null || content!.isEmpty) {
-      return const AppEmptyState(
-        icon: Icons.info_outline,
-        title: 'Aucun contexte défini',
-        subtitle: 'Ajoute un fichier context.md dans le dossier de la room sur GitHub.',
-      );
+    if (widget.loading) return const AppLoadingIndicator();
+
+    if (_editing) {
+      return Column(children: [
+        Expanded(child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Container(
+            decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: kBorder, width: 0.5)),
+            padding: const EdgeInsets.all(14),
+            child: TextField(
+              controller: _ctrl,
+              maxLines: null, expands: true,
+              autofocus: true,
+              textAlignVertical: TextAlignVertical.top,
+              style: GoogleFonts.inter(color: kText, fontSize: 13.5, height: 1.6),
+              cursorColor: kAccent, cursorWidth: 1.5,
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Décris le projet, ses objectifs, les infos utiles pour les agents…',
+                hintStyle: GoogleFonts.inter(color: kMuted2),
+              ),
+            ),
+          ),
+        )),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Row(children: [
+            Expanded(child: AppButton(
+              variant: AppButtonVariant.secondary, label: 'Annuler', fullWidth: true,
+              onTap: widget.saving ? null : _cancel,
+            )),
+            const SizedBox(width: 10),
+            Expanded(child: AppButton(
+              label: 'Enregistrer', loading: widget.saving, fullWidth: true,
+              onTap: widget.saving ? null : _save,
+            )),
+          ]),
+        ),
+      ]);
     }
-    return ListView(padding: const EdgeInsets.all(16), children: [
-      AppCard(padding: const EdgeInsets.all(16), child: _Markdown(content!)),
+
+    if (widget.content == null || widget.content!.isEmpty) {
+      return Stack(children: [
+        const AppEmptyState(
+          icon: Icons.info_outline,
+          title: 'Aucun contexte défini',
+          subtitle: 'Décris ici le projet, ses objectifs et les infos utiles pour les agents.',
+        ),
+        Positioned(
+          right: 16, bottom: 16,
+          child: AppButton(label: 'Ajouter un contexte', icon: Icons.add,
+            onTap: () => setState(() => _editing = true),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+        ),
+      ]);
+    }
+
+    return Stack(children: [
+      ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 90), children: [
+        AppCard(padding: const EdgeInsets.all(16), child: _Markdown(widget.content!)),
+      ]),
+      Positioned(
+        right: 16, bottom: 16,
+        child: AppButton(label: 'Modifier', icon: Icons.edit_outlined,
+          onTap: () => setState(() => _editing = true),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+      ),
     ]);
   }
 }
@@ -549,20 +695,26 @@ class _AddRuleBarState extends State<_AddRuleBar> {
   void _submit() { final t = _c.text.trim(); if (t.isNotEmpty) { widget.onAdd(t); _c.clear(); } }
 
   @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-    child: Row(children: [
-      const Icon(Icons.add, size: 16, color: kMuted2),
-      const SizedBox(width: 8),
-      Expanded(child: TextField(
+  Widget build(BuildContext context) => Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+    Expanded(child: Container(
+      decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(22), border: Border.all(color: kBorder, width: 0.5)),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+      child: TextField(
         controller: _c, maxLines: 1, onSubmitted: (_) => _submit(),
         style: GoogleFonts.inter(color: kText, fontSize: 13.5), cursorColor: kAccent, cursorWidth: 1.5,
         decoration: InputDecoration(border: InputBorder.none, hintText: 'Nouvelle règle…', hintStyle: GoogleFonts.inter(color: kMuted2), contentPadding: EdgeInsets.zero, isDense: true),
-      )),
-      AppButton(label: 'Ajouter', onTap: _submit, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7)),
-    ]),
-  );
+      ),
+    )),
+    const SizedBox(width: 8),
+    GestureDetector(
+      onTap: _submit,
+      child: Container(
+        width: 40, height: 40,
+        decoration: const BoxDecoration(color: kAccent, shape: BoxShape.circle),
+        child: const Icon(Icons.arrow_upward_rounded, size: 18, color: Colors.white),
+      ),
+    ),
+  ]);
 }
 
 // ─── Tab 3: Chat ──────────────────────────────────────────────────────────────
