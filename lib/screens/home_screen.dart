@@ -472,12 +472,21 @@ class _HomeScreenState extends State<HomeScreen> {
     final osMentions = _openSpaceSuggestions;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       _buildHeader(),
-      Expanded(child: isEmpty ? _buildHome() : _buildMsgs()),
-      // OpenSpace @@ overlay (priority)
-      if (_openSpaceQuery != null) _buildOpenSpaceOverlay(osMentions),
-      // Local @ overlay
-      if (_openSpaceQuery == null && _mentionQuery != null && mentions.isNotEmpty) _buildMentionOverlay(mentions),
-      _buildInput(),
+      Expanded(
+        child: Stack(
+          children: [
+            Positioned.fill(child: isEmpty ? _buildHome() : _buildMsgs()),
+            // OpenSpace @@ overlay (priority)
+            if (_openSpaceQuery != null)
+              Positioned(bottom: 0, left: 0, right: 0, child: _buildOpenSpaceOverlay(osMentions)),
+            // Local @ overlay
+            if (_openSpaceQuery == null && _mentionQuery != null && mentions.isNotEmpty)
+              Positioned(bottom: 0, left: 0, right: 0, child: _buildMentionOverlay(mentions)),
+            // Floating input bar
+            Positioned(bottom: 0, left: 0, right: 0, child: _buildInput()),
+          ],
+        ),
+      ),
     ]);
   }
 
@@ -612,7 +621,7 @@ class _HomeScreenState extends State<HomeScreen> {
     ),
   );
 
-  Widget _buildHome() => ListView(padding: EdgeInsets.zero, children: [
+  Widget _buildHome() => ListView(padding: const EdgeInsets.only(bottom: 120), children: [
     const SizedBox(height: 48),
     Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -663,7 +672,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildMsgs() => ListView.builder(
     controller: _scroll,
-    padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
+    padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
     itemCount: _msgs.length + (_sending ? 1 : 0),
     itemBuilder: (_, i) {
       if (i == _msgs.length) return const _TypingDots();
@@ -676,9 +685,8 @@ class _HomeScreenState extends State<HomeScreen> {
     final hasContent = _ctrl.text.trim().isNotEmpty || _files.isNotEmpty;
     return SafeArea(
       top: false,
-      child: Container(
+      child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-        color: kBg,
         child: Container(
           decoration: BoxDecoration(
             color: kCard,
