@@ -49,6 +49,14 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _sending = false;
   List<AttachedFile> _files = [];
 
+  // Pre-upload: maps file name → raw GitHub URL future
+  // Starts uploading files immediately when they are attached so
+  // upload finishes (or runs in parallel) while the user is typing.
+  final Map<String, Future<String?>> _preUploads = {};
+  // Staging ID shared for all pre-uploads in the current draft
+  late String _stagingId = _newStagingId();
+  static String _newStagingId() => '${DateTime.now().millisecondsSinceEpoch}';
+
   // Single @ mention (local files)
   String? _mentionQuery;
 
@@ -191,6 +199,11 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Start pre-uploading [file] to GitHub in the background immediately.
+  void _startPreUpload(AttachedFile file) {
+    _preUploads[file.name] = widget.github.preUploadFile(_stagingId, file);
+  }
+
   Future<void> _pickFiles() async {
     try {
       final res = await FilePicker.platform.pickFiles(allowMultiple: true, withData: true, type: FileType.any);
@@ -199,10 +212,12 @@ class _HomeScreenState extends State<HomeScreen> {
         for (final f in res.files) {
           if (f.bytes == null) continue;
           final n = f.name.toLowerCase();
-          _files.insert(0, AttachedFile(
+          final af = AttachedFile(
             name: f.name, bytes: f.bytes!,
             isImage: n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.gif') || n.endsWith('.webp'),
-          ));
+          );
+          _files.insert(0, af);
+          _startPreUpload(af);
         }
       });
     } catch (_) {}
@@ -214,7 +229,6 @@ class _HomeScreenState extends State<HomeScreen> {
       if (imgs.isEmpty) return;
       for (int i = 0; i < imgs.length; i++) {
         final bytes = await imgs[i].readAsBytes();
-        // Try name from .name, fallback to path basename, then stamp
         final fromName = imgs[i].name;
         final fromPath = imgs[i].path.split('/').last.split('\\').last;
         String name;
@@ -225,7 +239,11 @@ class _HomeScreenState extends State<HomeScreen> {
         } else {
           name = _stampName(i);
         }
-        if (mounted) setState(() => _files.insert(0, AttachedFile(name: name, bytes: bytes, isImage: true)));
+        final af = AttachedFile(name: name, bytes: bytes, isImage: true);
+        if (mounted) setState(() {
+          _files.insert(0, af);
+          _startPreUpload(af);
+        });
       }
     } catch (_) {}
   }
@@ -397,16 +415,34 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     if (result == null) return;
 
-    final text      = _ctrl.text;
-    final filesCopy = List<AttachedFile>.from(_files);
-    setState(() { _msgs.add(_Msg.user(text, filesCopy, result.room)); _ctrl.clear(); _files = []; _sending = true; });
+    final text        = _ctrl.text;
+    final filesCopy   = List<AttachedFile>.from(_files);
+    final preUploads  = Map<String, Future<String?>>.from(_preUploads);
+    setState(() {
+      _msgs.add(_Msg.user(text, filesCopy, result.room));
+      _ctrl.clear();
+      _files = [];
+      _preUploads.clear();
+      _stagingId = _newStagingId(); // fresh staging ID for next draft
+      _sending = true;
+    });
     _scrollBottom();
 
     try {
+      // Await all pre-uploads that finished (timeout 1s so we don't block long)
+      final resolvedUrls = <String, String>{};
+      for (final entry in preUploads.entries) {
+        try {
+          final url = await entry.value.timeout(const Duration(seconds: 1));
+          if (url != null) resolvedUrls[entry.key] = url;
+        } catch (_) {}
+      }
+
       final id = _generatePromptId();
       String? roomContext;
       if (result.room != null) roomContext = await widget.github.fetchContext(result.room!.id);
-      final link   = await widget.github.pushDirectPrompt(id, text, filesCopy, room: result.room, roomContext: roomContext);
+      final link   = await widget.github.pushDirectPrompt(id, text, filesCopy,
+        room: result.room, roomContext: roomContext, preUploadedUrls: resolvedUrls);
       final name   = result.name.isNotEmpty ? result.name : defaultName;
       final prompt = SavedPrompt(id: id, name: name, link: link, created: DateTime.now());
       final saved  = await PrefsService.addPrompt(prompt);
@@ -704,12 +740,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     scrollDirection: Axis.horizontal,
                     itemCount: _files.length,
                     separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (_, i) => _FileChip(
-                      file: _files[i],
-                      onTap: _files[i].isImage ? () => _showImageFullscreen(_files[i].bytes, _files[i].name) : null,
+                    itemBuilder: (_, i) {
+                    final f = _files[i];
+                    final uploadFuture = _preUploads[f.name];
+                    return _FileChip(
+                      file: f,
+                      uploadFuture: uploadFuture,
+                      onTap: f.isImage ? () => _showImageFullscreen(f.bytes, f.name) : null,
                       onLongPress: () => _showFileMenu(i),
-                      onRemove: () => setState(() => _files.removeAt(i)),
-                    ),
+                      onRemove: () => setState(() { _files.removeAt(i); _preUploads.remove(f.name); }),
+                    );
+                  },
                   ),
                 ),
               ),
@@ -817,10 +858,11 @@ class _HomeScreenState extends State<HomeScreen> {
 // ── _FileChip ─────────────────────────────────────────────────────────────────
 class _FileChip extends StatelessWidget {
   final AttachedFile file;
+  final Future<String?>? uploadFuture;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
   final VoidCallback onRemove;
-  const _FileChip({required this.file, this.onTap, this.onLongPress, required this.onRemove});
+  const _FileChip({required this.file, this.uploadFuture, this.onTap, this.onLongPress, required this.onRemove});
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -837,6 +879,31 @@ class _FileChip extends StatelessWidget {
                 Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
                   child: Text(file.name, style: GoogleFonts.inter(color: kMuted2, fontSize: 8.5), maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
               ])),
+      // Upload indicator — spinner while uploading, check when done
+      if (uploadFuture != null) Positioned(
+        top: 3, left: 3,
+        child: FutureBuilder<String?>(
+          future: uploadFuture,
+          builder: (_, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return Container(
+                width: 18, height: 18,
+                decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                padding: const EdgeInsets.all(3),
+                child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5),
+              );
+            }
+            if (snap.data != null) {
+              return Container(
+                width: 18, height: 18,
+                decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                child: const Icon(Icons.check, size: 11, color: Colors.white),
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
       if (file.isImage) Positioned(
         bottom: 3, left: 3,
         child: GestureDetector(
