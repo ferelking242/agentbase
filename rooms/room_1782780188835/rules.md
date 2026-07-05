@@ -1,12 +1,38 @@
 # Règles pour Watchtower
 
-Ces règles s'appliquent à tout agent qui travaille sur le code source d'AgentBase (le projet lui-même, pas un projet tiers géré via l'app).
+## Setup obligatoire — première chose à faire
 
-1. **Un changement à la fois.** Traiter les demandes une par une, "doucement" : ne pas mélanger plusieurs fonctionnalités non liées dans le même lot de modifications.
-2. **Cohérence visuelle.** Réutiliser les composants et motifs déjà présents (`AppButton`, `AppCard`, `AppInput`, etc.) plutôt que d'en recréer de nouveaux. Respecter la palette de couleurs et l'espacement existants.
-3. **Pas de coins imbriqués mal alignés.** Ne jamais placer un élément à coins arrondis directement contre le bord d'un conteneur dont le rayon est plus petit que son padding — toujours vérifier que les rayons s'emboîtent proprement (comme dans le pattern de la barre de saisie du Chat).
-4. **Toujours documenter dans Transcription.** Après chaque modification livrée, ajouter une entrée de transcription claire et compréhensible par un non-développeur.
-5. **Contexte à jour.** Si un changement modifie la structure ou le fonctionnement général de l'app, mettre à jour `context.md` en conséquence.
-6. **Pousser via l'API GitHub.** Toute modification doit être poussée sur le dépôt `ferelking242/agentbase` via l'API Contents/Git de GitHub (jamais via un token autre que celui fourni de façon sécurisée).
-7. **Vérifier avant de pousser.** En l'absence de SDK Flutter local, relire attentivement le code Dart modifié (syntaxe, imports, types) avant de le pousser, et s'appuyer sur la CI GitHub Actions comme filet de sécurité.
-8. **Rester simple.** Préférer une solution simple et lisible à une solution complexe, surtout dans une base de code sans tests automatisés Flutter actifs.
+**OBLIGATOIRE** : avant tout travail de code, cloner les deux dépôts en local à la racine du workspace. Ne jamais modifier de fichiers via l'API GitHub sans avoir d'abord le code en local pour le lire. Ne jamais deviner la structure — toujours lire le fichier existant avant d'écrire.
+
+```
+workspace/
+├── watchtower/              ← github.com/ferelking242/watchtower
+└── watchtower-extensions/   ← github.com/ferelking242/watchtower-extensions
+```
+
+## Règles absolues
+
+1. **Push immédiat.** Dès qu'une modification est complète, pousser immédiatement sur `main`. Une tâche finie = un push.
+2. **Surveiller le build après chaque push.** Suivre `Build Flutter Web` jusqu'à sa conclusion. En cas d'échec : lire les logs, corriger, repousser, resurveiller.
+3. **Pas de mock, pas de placeholder.** Aucun code factice, aucun TODO laissé en place.
+4. **Vérifier avant de déclarer terminé.** Relire l'historique et confirmer que chaque tâche demandée a bien été poussée avant de dire que c'est fini.
+5. **Toujours demander la suite.** Une fois une tâche terminée et poussée, demander explicitement quelle est la prochaine priorité.
+6. **Format des commits obligatoire** : `type: description courte en anglais`.
+
+   | Type | Quand l'utiliser |
+   |---|---|
+   | `feat:` | Nouvelle fonctionnalité |
+   | `change:` | Changement de comportement existant |
+   | `improve:` | Amélioration sans nouveau comportement (perf, UX, refactor) |
+   | `fix:` | Correction de bug |
+   | `remove:` | Suppression de code/feature/fichier |
+
+   Interdit : messages génériques (`update`, `fix stuff`, `wip`, `changes`).
+
+7. **Pousser via l'API GitHub uniquement.** Le git commit/push direct n'est pas disponible dans le sandbox de l'agent ; utiliser l'API Contents/Git avec le token stocké en secret d'environnement (jamais un token en clair dans un fichier, un commit ou un message).
+8. **Toujours documenter dans Transcription.** Après chaque modification livrée, ajouter une entrée claire et compréhensible par un non-développeur.
+9. **Contexte à jour.** Si un changement modifie la structure ou le fonctionnement général du projet, mettre à jour `context.md` en conséquence.
+
+## Note de sécurité
+
+La v1 de ce contexte vivait dans un gist GitHub public, qui contenait un token d'accès personnel en clair. **Ce token doit être révoqué immédiatement** (Paramètres GitHub → Developer settings → Personal access tokens) et ne doit plus jamais être réutilisé ni republié où que ce soit. Toute automatisation doit utiliser exclusivement le secret d'environnement configuré pour ce workspace.
