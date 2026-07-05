@@ -120,7 +120,7 @@ class _Page0 extends StatelessWidget {
   Widget build(BuildContext context) => _OnboardingPage(
     icon: Icons.bolt,
     iconColor: kAccent,
-    title: 'Bienvenue sur\nAivos AgentBase',
+    title: 'Bienvenue sur\nAgentBase',
     subtitle: 'Ton workspace IA.\nCrée, organise et pousse tes prompts vers GitHub en un tap.',
     highlight: 'Versionné. Portable. Toujours dispo.',
   );
