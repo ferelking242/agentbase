@@ -289,9 +289,8 @@ class _FullscreenComposerScreenState extends State<FullscreenComposerScreen> {
       backgroundColor: kBg,
       body: SafeArea(child: Column(children: [
         // Header
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
-          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: kBorder, width: 0.5))),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           child: Row(children: [
             GestureDetector(
               onTap: () => Navigator.pop(context),
@@ -301,126 +300,152 @@ class _FullscreenComposerScreenState extends State<FullscreenComposerScreen> {
             const SizedBox(width: 12),
             Text('Composer', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600, letterSpacing: -0.3)),
             const Spacer(),
-            _ToolBtn(icon: Icons.add_photo_alternate_outlined, onTap: _pickFromGallery, tooltip: 'Image'),
-            _ToolBtn(icon: Icons.attach_file, onTap: _pickFiles, tooltip: 'Fichier'),
-            _ToolBtn(icon: Icons.content_paste_rounded, onTap: _paste, tooltip: 'Coller'),
           ]),
         ),
 
-        // Images preview strip (non-text files on top)
-        if (_files.any((f) => f.isImage))
-          Container(
-            height: 90,
-            color: kCard.withOpacity(0.4),
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              itemCount: _files.where((f) => f.isImage).length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
-              itemBuilder: (_, i) {
-                final imgFiles = _files.where((f) => f.isImage).toList();
-                final f = imgFiles[i];
-                final idx = _files.indexOf(f);
-                return GestureDetector(
-                  onTap: () => _showImagePreview(f.bytes, f.name),
-                  onLongPress: () => _showFileMenu(idx),
-                  child: Stack(children: [
-                    ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(f.bytes, width: 74, height: 74, fit: BoxFit.cover)),
-                    Positioned(
-                      bottom: 2, left: 2,
-                      child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
-                        child: const Icon(Icons.edit, size: 9, color: Colors.white70)),
+        // Unified composer box — fills remaining space, one rounded container
+        Expanded(child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: kCard,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: kBorder, width: 0.5),
+            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              // Images preview strip (inside the box, ChatGPT-style)
+              if (_files.any((f) => f.isImage))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 0),
+                  child: SizedBox(
+                    height: 76,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _files.where((f) => f.isImage).length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 8),
+                      itemBuilder: (_, i) {
+                        final imgFiles = _files.where((f) => f.isImage).toList();
+                        final f = imgFiles[i];
+                        final idx = _files.indexOf(f);
+                        return GestureDetector(
+                          onTap: () => _showImagePreview(f.bytes, f.name),
+                          onLongPress: () => _showFileMenu(idx),
+                          child: Stack(children: [
+                            ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.memory(f.bytes, width: 74, height: 74, fit: BoxFit.cover)),
+                            Positioned(
+                              bottom: 2, left: 2,
+                              child: Container(padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+                                child: const Icon(Icons.edit, size: 9, color: Colors.white70)),
+                            ),
+                            Positioned(
+                              top: 2, right: 2,
+                              child: GestureDetector(
+                                onTap: () => setState(() => _files.removeAt(idx)),
+                                child: Container(width: 18, height: 18,
+                                  decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                                  child: const Icon(Icons.close, size: 11, color: Colors.white70)),
+                              ),
+                            ),
+                          ]),
+                        );
+                      },
                     ),
-                    Positioned(
-                      top: 2, right: 2,
-                      child: GestureDetector(
-                        onTap: () => setState(() => _files.removeAt(idx)),
-                        child: Container(width: 18, height: 18,
-                          decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
-                          child: const Icon(Icons.close, size: 11, color: Colors.white70)),
+                  ),
+                ),
+
+              // Non-image file chips (inside the box)
+              if (_files.any((f) => !f.isImage))
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                  child: Wrap(spacing: 6, runSpacing: 6, children: _files.where((f) => !f.isImage).map((f) {
+                    final idx = _files.indexOf(f);
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.attach_file, size: 14, color: kAccentMid),
+                        const SizedBox(width: 4),
+                        Text(f.name, style: GoogleFonts.inter(color: kMuted, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        const SizedBox(width: 4),
+                        GestureDetector(onTap: () => setState(() => _files.removeAt(idx)), child: const Icon(Icons.close, size: 13, color: kMuted2)),
+                      ]),
+                    );
+                  }).toList()),
+                ),
+
+              // Mention overlay (inside the box, above the text field)
+              if (_mentionQuery != null && mentions.isNotEmpty)
+                Container(
+                  margin: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                  constraints: const BoxConstraints(maxHeight: 150),
+                  decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(12), border: Border.all(color: kBorder, width: 0.5)),
+                  child: ListView.builder(
+                    shrinkWrap: true, padding: const EdgeInsets.symmetric(vertical: 4), itemCount: mentions.length,
+                    itemBuilder: (_, i) {
+                      final f = mentions[i];
+                      return ListTile(
+                        dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                        leading: f.isImage
+                            ? ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.memory(f.bytes, width: 30, height: 30, fit: BoxFit.cover))
+                            : const Icon(Icons.attach_file, size: 20, color: kAccentMid),
+                        title: Text('@${f.name.replaceAll(' ', '_').replaceAll('.', '_')}', style: GoogleFonts.inter(color: kAccentMid, fontSize: 13)),
+                        onTap: () => _insertMention(f),
+                      );
+                    },
+                  ),
+                ),
+
+              // Main text area — flexes to fill remaining box height
+              Expanded(child: TextField(
+                controller: _ctrl, focusNode: _focus,
+                maxLines: null, expands: true,
+                onChanged: (_) => setState(() {}),
+                style: GoogleFonts.inter(color: kText, fontSize: 15, height: 1.65),
+                cursorColor: kAccent, cursorWidth: 1.5,
+                decoration: InputDecoration(
+                  hintText: 'Écris ton prompt complet ici…\n\nUtilise @ pour mentionner une image.',
+                  hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 15, height: 1.65),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.fromLTRB(18, 14, 18, 4),
+                ),
+              )),
+
+              // Bottom toolbar — part of the same box
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
+                child: Row(children: [
+                  _ToolBtn(icon: Icons.add_photo_alternate_outlined, onTap: _pickFromGallery, tooltip: 'Image'),
+                  _ToolBtn(icon: Icons.attach_file, onTap: _pickFiles, tooltip: 'Fichier'),
+                  _ToolBtn(icon: Icons.content_paste_rounded, onTap: _paste, tooltip: 'Coller'),
+                  const Spacer(),
+                  Text('${_ctrl.text.length} car.', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
+                  if (_files.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Text('• ${_files.length} fichier${_files.length > 1 ? "s" : ""}', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
+                  ],
+                  const SizedBox(width: 10),
+                  GestureDetector(
+                    onTap: (hasContent && !_sending) ? _send : null,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      width: 38, height: 38,
+                      decoration: BoxDecoration(
+                        color: hasContent ? kAccent : kCard2,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
                       ),
+                      child: _sending
+                          ? const Center(child: SizedBox(width: 15, height: 15, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
+                          : Icon(Icons.arrow_upward_rounded, size: 18, color: hasContent ? Colors.white : kMuted2),
                     ),
-                  ]),
-                );
-              },
-            ),
-          ),
-
-        // Non-image file chips
-        if (_files.any((f) => !f.isImage))
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: Wrap(spacing: 6, runSpacing: 6, children: _files.where((f) => !f.isImage).map((f) {
-              final idx = _files.indexOf(f);
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.attach_file, size: 14, color: kAccentMid),
-                  const SizedBox(width: 4),
-                  Text(f.name, style: GoogleFonts.inter(color: kMuted, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
-                  const SizedBox(width: 4),
-                  GestureDetector(onTap: () => setState(() => _files.removeAt(idx)), child: const Icon(Icons.close, size: 13, color: kMuted2)),
+                  ),
                 ]),
-              );
-            }).toList()),
-          ),
-
-        // Mention overlay
-        if (_mentionQuery != null && mentions.isNotEmpty)
-          Container(
-            constraints: const BoxConstraints(maxHeight: 150),
-            decoration: const BoxDecoration(color: kCard, border: Border(top: BorderSide(color: kBorder, width: 0.5))),
-            child: ListView.builder(
-              shrinkWrap: true, padding: EdgeInsets.zero, itemCount: mentions.length,
-              itemBuilder: (_, i) {
-                final f = mentions[i];
-                return ListTile(
-                  dense: true, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-                  leading: f.isImage
-                      ? ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.memory(f.bytes, width: 30, height: 30, fit: BoxFit.cover))
-                      : const Icon(Icons.attach_file, size: 20, color: kAccentMid),
-                  title: Text('@${f.name.replaceAll(' ', '_').replaceAll('.', '_')}', style: GoogleFonts.inter(color: kAccentMid, fontSize: 13)),
-                  onTap: () => _insertMention(f),
-                );
-              },
-            ),
-          ),
-
-        // Main text area
-        Expanded(child: TextField(
-          controller: _ctrl, focusNode: _focus,
-          maxLines: null, expands: true,
-          onChanged: (_) => setState(() {}),
-          style: GoogleFonts.inter(color: kText, fontSize: 15, height: 1.65),
-          cursorColor: kAccent, cursorWidth: 1.5,
-          decoration: InputDecoration(
-            hintText: 'Écris ton prompt complet ici…\n\nUtilise @ pour mentionner une image.',
-            hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 15, height: 1.65),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+              ),
+            ]),
           ),
         )),
-
-        // Bottom action bar
-        Container(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
-          decoration: const BoxDecoration(border: Border(top: BorderSide(color: kBorder, width: 0.5))),
-          child: Row(children: [
-            Text('${_ctrl.text.length} car.', style: GoogleFonts.inter(color: kMuted2, fontSize: 12)),
-            const SizedBox(width: 8),
-            if (_files.isNotEmpty) Text('• ${_files.length} fichier${_files.length > 1 ? "s" : ""}', style: GoogleFonts.inter(color: kMuted2, fontSize: 12)),
-            const Spacer(),
-            AppButton(
-              label: _sending ? 'Envoi…' : 'Envoyer',
-              icon: _sending ? null : Icons.arrow_upward_rounded,
-              loading: _sending,
-              onTap: (hasContent && !_sending) ? _send : null,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            ),
-          ]),
-        ),
       ])),
     );
   }
