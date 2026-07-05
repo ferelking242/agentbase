@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -174,12 +174,64 @@ jobs:
           retention-days: 30
 
   # ─────────────────────────────────────────────
+  #  RELEASE (permanent download, doesn't expire like Actions artifacts)
+  # ─────────────────────────────────────────────
+  release:
+    name: 📦 Publish Release
+    runs-on: ubuntu-latest
+    needs: [build-android, build-ios]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: agentbase-android-${{ github.sha }}
+          path: dist
+
+      - name: Download Android arm64 APK
+        uses: actions/download-artifact@v4
+        with:
+          name: agentbase-android-arm64-${{ github.sha }}
+          path: dist
+        continue-on-error: true
+
+      - name: Download iOS IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: agentbase-ios-${{ github.sha }}
+          path: dist
+        continue-on-error: true
+
+      - name: Rename artifacts
+        run: |
+          cd dist
+          [ -f app-release.apk ] && mv app-release.apk agentbase-android.apk || true
+          [ -f app-arm64-v8a-release.apk ] && mv app-arm64-v8a-release.apk agentbase-android-arm64.apk || true
+          [ -f AgentBase.ipa ] && mv AgentBase.ipa agentbase-ios.ipa || true
+          ls -la
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: "Build #${{ github.run_number }} (${{ github.sha }})"
+          body: |
+            Automated build from commit `${{ github.sha }}`.
+
+            🌐 Web: https://ferelking242.github.io/agentbase
+          files: dist/*
+          fail_on_unmatched_files: false
+
+  # ─────────────────────────────────────────────
   #  SUMMARY
   # ─────────────────────────────────────────────
   summary:
     name: 📋 Build Summary
     runs-on: ubuntu-latest
-    needs: [build-web, build-android, build-ios]
+    needs: [build-web, build-android, build-ios, release]
     if: always()
 
     steps:
@@ -192,6 +244,7 @@ jobs:
           echo "| 🌐 Web (GitHub Pages) | ${{ needs.build-web.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🤖 Android APK | ${{ needs.build-android.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 🍎 iOS IPA | ${{ needs.build-ios.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📦 Release | ${{ needs.release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "🌐 **Live:** https://ferelking242.github.io/agentbase" >> $GITHUB_STEP_SUMMARY
           echo "Commit: \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
