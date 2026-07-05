@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'services/github_service.dart';
-import 'services/prefs_service.dart';
 import 'screens/shell_screen.dart';
-import 'screens/onboarding_screen.dart';
 import 'theme.dart';
 
 Future<void> main() async {
@@ -12,20 +10,9 @@ Future<void> main() async {
     statusBarColor: Colors.transparent,
     statusBarBrightness: Brightness.dark,
     statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: kCard,
+    systemNavigationBarColor: kBg,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
-
-  final seen = await PrefsService.isOnboardingSeen();
-  if (!seen) {
-    runApp(MaterialApp(
-      title: 'AgentBase',
-      theme: buildTheme(),
-      debugShowCheckedModeBanner: false,
-      home: const OnboardingScreen(),
-    ));
-    return;
-  }
 
   final github = GitHubService();
   try { await github.init(); } catch (_) {}
