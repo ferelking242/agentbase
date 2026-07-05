@@ -403,7 +403,7 @@ class _HomeScreenState extends State<HomeScreen> {
     _scrollBottom();
 
     try {
-      final id = DateTime.now().millisecondsSinceEpoch.toString();
+      final id = _generatePromptId();
       String? roomContext;
       if (result.room != null) roomContext = await widget.github.fetchContext(result.room!.id);
       final link   = await widget.github.pushDirectPrompt(id, text, filesCopy, room: result.room, roomContext: roomContext);
@@ -694,12 +694,12 @@ class _HomeScreenState extends State<HomeScreen> {
             border: Border.all(color: kBorder, width: 0.5),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Images inside the box (like ChatGPT)
+            // Files strip inside the box (only when files attached)
             if (_files.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
                 child: SizedBox(
-                  height: 76,
+                  height: 72,
                   child: ListView.separated(
                     scrollDirection: Axis.horizontal,
                     itemCount: _files.length,
@@ -713,42 +713,62 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-            TextField(
-              controller: _ctrl, focusNode: _focus, maxLines: 6, minLines: 1,
-              onChanged: (_) => setState(() {}),
-              style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.5),
-              cursorColor: kAccent, cursorWidth: 1.5,
-              decoration: InputDecoration(
-                hintText: 'Écris ton prompt… ou tape @ ou @@',
-                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
-                isDense: true,
+            // Single row: [+]  [text field]  [⤢] [↑]
+            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+              // + button — leftmost, inside the box
+              GestureDetector(
+                onTap: _showAttachMenu,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 2, 10),
+                  child: Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(color: kCard2, shape: BoxShape.circle),
+                    child: const Icon(Icons.add, size: 18, color: kMuted),
+                  ),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-              child: Row(children: [
-                _ToolBtn(icon: Icons.add, onTap: _showAttachMenu, tooltip: 'Joindre'),
-                _ToolBtn(icon: Icons.auto_awesome_outlined, onTap: _showTemplates, tooltip: 'Templates'),
-                const Spacer(),
-                _ToolBtn(icon: Icons.open_in_full_rounded, onTap: _openFullscreen, tooltip: 'Plein écran'),
-                const SizedBox(width: 4),
-                GestureDetector(
+              // Text field — fills remaining space
+              Expanded(
+                child: TextField(
+                  controller: _ctrl, focusNode: _focus, maxLines: 6, minLines: 1,
+                  onChanged: (_) => setState(() {}),
+                  style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.5),
+                  cursorColor: kAccent, cursorWidth: 1.5,
+                  decoration: InputDecoration(
+                    hintText: 'Écris ton prompt…',
+                    hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              // Fullscreen icon
+              GestureDetector(
+                onTap: _openFullscreen,
+                child: const Padding(
+                  padding: EdgeInsets.fromLTRB(4, 0, 6, 14),
+                  child: Icon(Icons.open_in_full_rounded, size: 15, color: kMuted2),
+                ),
+              ),
+              // Send button
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 0, 8, 8),
+                child: GestureDetector(
                   onTap: hasContent ? _send : null,
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     width: 34, height: 34,
                     decoration: BoxDecoration(
                       color: hasContent ? kAccent : kCard2,
-                      borderRadius: BorderRadius.circular(17),
+                      shape: BoxShape.circle,
                       border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
                     ),
                     child: Icon(Icons.arrow_upward_rounded, size: 18, color: hasContent ? Colors.white : kMuted2),
                   ),
                 ),
-              ]),
-            ),
+              ),
+            ]),
           ]),
         ),
       ),
