@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/room.dart';
@@ -6,6 +7,15 @@ import '../models/prompt.dart';
 import '../models/message.dart';
 import '../models/saved_prompt.dart';
 import '../services/prefs_service.dart';
+
+/// Generates a unique prompt ID: 13-digit timestamp + 6 random hex chars.
+/// Avoids collisions across devices even at the same millisecond.
+String _generatePromptId() {
+  final ts  = DateTime.now().millisecondsSinceEpoch;
+  final rng = Random.secure();
+  final hex = List.generate(6, (_) => rng.nextInt(16).toRadixString(16)).join();
+  return '${ts}_$hex';
+}
 
 class AttachedFile {
   final String name;
@@ -183,6 +193,7 @@ class GitHubService {
   }
 
   Future<String?> fetchContext(String roomId) => _raw_('rooms/$roomId/context.md');
+  Future<String?> fetchRoomFile(String roomId, String fileName) => _raw_('rooms/$roomId/$fileName');
   Future<String?> fetchRules(String roomId) => _raw_('rooms/$roomId/rules.md');
 
   Future<List<String>> listFiles(String roomId) async {
@@ -386,7 +397,13 @@ class GitHubService {
       final r = await _client.get(Uri.parse('$_api/contents/prompts'), headers: _h);
       if (r.statusCode != 200) return [];
       final files = (jsonDecode(r.body) as List<dynamic>)
-          .where((f) => (f['name'] as String).endsWith('.md'))
+          .where((f) {
+            final name = f['name'] as String;
+            if (!name.endsWith('.md')) return false;
+            final id = name.replaceAll('.md', '');
+            // Accept: 13-digit timestamp, timestamp_hex, or timestamp_hex format
+            return RegExp(r'^\d{13}').hasMatch(id);
+          })
           .toList();
       final results = <SavedPrompt>[];
       await Future.wait(files.map((f) async {
@@ -397,34 +414,43 @@ class GitHubService {
         String promptName = id;
         DateTime? created;
         if (content != null) {
-          for (final line in content.split('\n')) {
-            if (line.startsWith('**Created:**')) {
-              try { created = DateTime.parse(line.replaceFirst('**Created:**', '').trim()); } catch (_) {}
-            }
-          }
-          final lines = content.split('\n');
-          final idx = lines.indexWhere((l) => l.trim() == '## Contenu');
-          if (idx != -1) {
-            for (int i = idx + 1; i < lines.length && i < idx + 5; i++) {
-              final l = lines[i].trim();
-              if (l.isNotEmpty && !l.startsWith('#') && !l.startsWith('**') && l != '_(aucun texte)_') {
-                promptName = _smartTitle(l);
-                break;
-              }
-            }
+          final clean = stripPromptMeta(content);
+          if (clean.isNotEmpty) promptName = _smartTitle(clean);
+          // Extract timestamp from ID (works for both old and new format)
+          final tsMatch = RegExp(r'^(\d{13})').firstMatch(id);
+          if (tsMatch != null) {
+            created = DateTime.fromMillisecondsSinceEpoch(int.parse(tsMatch.group(1)!));
           }
         }
         results.add(SavedPrompt(
           id: id,
           name: promptName.isNotEmpty ? promptName : id,
           link: rawUrl,
-          created: created ?? DateTime.fromMillisecondsSinceEpoch(
-              int.tryParse(id) ?? DateTime.now().millisecondsSinceEpoch),
+          created: created ?? DateTime.now(),
         ));
       }));
       results.sort((a, b) => b.created.compareTo(a.created));
       return results;
     } catch (_) { return []; }
+  }
+
+  /// Strips legacy metadata (HTML comment block + ## Contenu header) from raw file content.
+  static String stripPromptMeta(String raw) {
+    var s = raw;
+    // Remove HTML comment metadata block
+    s = s.replaceAll(RegExp(r'<!--[\s\S]*?-->', multiLine: true), '');
+    // Remove legacy ## Contenu section header (keep the content after it)
+    final contenuIdx = s.indexOf('## Contenu');
+    if (contenuIdx != -1) {
+      s = s.substring(contenuIdx + '## Contenu'.length);
+    }
+    // Remove ## Pièces jointes and everything after (not part of the prompt)
+    final pjIdx = s.indexOf('\n## Pièces jointes');
+    if (pjIdx != -1) s = s.substring(0, pjIdx);
+    // Remove room context separator
+    final sepIdx = s.indexOf('\n\n---\n\n## Contexte');
+    if (sepIdx != -1) s = s.substring(0, sepIdx);
+    return s.trim();
   }
 
   static String _smartTitle(String raw) {
@@ -547,40 +573,33 @@ class GitHubService {
     // Fichiers non mentionnés → section "Pièces jointes" avec data URI aussi
     final nonMentioned = inlineMap.entries.where((e) => !usedFiles.contains(e.key)).toList();
 
-    final now = DateTime.now();
-    final sb  = StringBuffer();
-    sb.writeln('<!-- AGENTBASE_META');
-    sb.writeln('ID: $id');
-    sb.writeln('Created: ${now.toIso8601String()}');
-    if (room != null) sb.writeln('Room: ${room.name} (${room.id})');
-    sb.writeln('-->');
-    sb.writeln();
-    sb.writeln('## Contenu');
-    sb.writeln();
-    sb.writeln(inlineContent.isNotEmpty ? inlineContent : '_(aucun texte)_');
+    // Build clean prompt content — no metadata block, no section headers
+    final sb = StringBuffer();
+    if (inlineContent.isNotEmpty) sb.write(inlineContent);
+
+    // Non-mentioned attachments appended after the text
     if (nonMentioned.isNotEmpty) {
-      sb.writeln(); sb.writeln('## Pièces jointes'); sb.writeln();
+      if (sb.isNotEmpty) sb.write('\n\n');
       for (final e in nonMentioned) {
         if (e.value.isEmpty) continue;
         final isImg = ['png','jpg','jpeg','gif','webp']
             .contains(e.key.split('.').last.toLowerCase());
-        // Inline si data URI, lien sinon (non-image ou image trop grosse)
-        if (isImg && e.value.startsWith('data:')) {
-          sb.writeln('![${e.key}](${e.value})');
-        } else if (isImg) {
+        if (isImg) {
           sb.writeln('![${e.key}](${e.value})');
         } else {
           sb.writeln('[${e.key}](${e.value})');
         }
       }
     }
+
+    // Room context appended as a separator section (useful for the agent)
     if (roomContext != null && roomContext.trim().isNotEmpty) {
-      sb.writeln(); sb.writeln('---'); sb.writeln();
-      sb.writeln('## Contexte — ${room?.name ?? "Global"}'); sb.writeln();
-      sb.writeln(roomContext.trim());
+      sb.write('\n\n---\n\n## Contexte — ${room?.name ?? "Global"}\n\n');
+      sb.write(roomContext.trim());
     }
+
     final promptPath = 'prompts/$id.md';
-    final body = jsonEncode({'message': 'Prompt $id', 'content': base64Encode(utf8.encode(sb.toString()))});
+    final body = jsonEncode({'message': 'prompt: $id', 'content': base64Encode(utf8.encode(sb.toString()))});
     final r = await _client.put(Uri.parse('$_api/contents/$promptPath'), headers: _h, body: body);
     if (r.statusCode != 201 && r.statusCode != 200) throw Exception('Sauvegarde échouée: ${r.statusCode}');
     return '$_raw/$promptPath';
