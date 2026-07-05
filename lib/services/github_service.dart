@@ -472,6 +472,16 @@ class GitHubService {
 
   // ── Upload asset helper ───────────────────────────────────────────────────
 
+  /// Pre-upload a file to a staging path and return its raw URL.
+  /// Call this as soon as the user attaches a file so uploads run while they type.
+  Future<String?> preUploadFile(String stagingId, AttachedFile file) async {
+    if (_pat.isEmpty) return null;
+    try {
+      final safeName = file.name.replaceAll(' ', '_');
+      return await _uploadAsset('assets/staging/$stagingId/$safeName', file.bytes);
+    } catch (_) { return null; }
+  }
+
   Future<String> _uploadAsset(String path, Uint8List bytes, {String? message}) async {
     String? sha;
     final check = await _client.get(Uri.parse('$_api/contents/$path'), headers: _h);
@@ -508,6 +518,7 @@ class GitHubService {
   Future<String> pushDirectPrompt(
     String id, String text, List<AttachedFile> files, {
     Room? room, String? roomContext,
+    Map<String, String> preUploadedUrls = const {},
   }) async {
     if (_pat.isEmpty) throw Exception('PAT non configuré — va dans Paramètres');
 
@@ -518,11 +529,16 @@ class GitHubService {
 
     for (final f in files) {
       final safeName = f.name.replaceAll(' ', '_');
-      // Upload vers GitHub pour la sauvegarde
-      try {
-        final url = await _uploadAsset('assets/prompts/$id/$safeName', f.bytes);
-        urlMap[f.name] = url;
-      } catch (_) {}
+      // Use pre-uploaded URL if available (uploaded while user was typing)
+      if (preUploadedUrls.containsKey(f.name)) {
+        urlMap[f.name] = preUploadedUrls[f.name]!;
+      } else {
+        // Upload vers GitHub pour la sauvegarde
+        try {
+          final url = await _uploadAsset('assets/prompts/$id/$safeName', f.bytes);
+          urlMap[f.name] = url;
+        } catch (_) {}
+      }
       // Construit la data URI base64 pour l'affichage inline (Claude / ChatGPT)
       if (f.isImage) {
         final dataUri = _imageDataUri(f.name, f.bytes);
