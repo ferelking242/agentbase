@@ -92,14 +92,16 @@ class _PromptCardState extends State<_PromptCard> {
     if (_loadingContent) return;
     setState(() => _loadingContent = true);
     try {
-      final content = await widget.github.fetchPromptContent(widget.prompt.id);
+      final raw = await widget.github.fetchPromptContent(widget.prompt.id);
       if (!mounted) return;
-      if (content == null) {
+      if (raw == null) {
         showAppSnack(context, 'Contenu introuvable', isError: true);
         setState(() => _loadingContent = false);
         return;
       }
-      await Clipboard.setData(ClipboardData(text: content));
+      // Strip legacy metadata to get the clean prompt text
+      final content = GitHubService.stripPromptMeta(raw);
+      await Clipboard.setData(ClipboardData(text: content.isNotEmpty ? content : raw));
       setState(() { _loadingContent = false; _copiedContent = true; });
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) setState(() => _copiedContent = false);
