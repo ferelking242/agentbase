@@ -203,6 +203,19 @@ class GitHubService {
     } catch (_) { return null; }
   }
 
+  Future<void> pushContext(String roomId, String content) async {
+    if (_pat.isEmpty) throw Exception('No PAT');
+    final path = 'rooms/$roomId/context.md';
+    final sha = await _fileSha(path);
+    final body = <String, dynamic>{
+      'message': 'Update context.md — $roomId',
+      'content': base64Encode(utf8.encode(content)),
+    };
+    if (sha != null) body['sha'] = sha;
+    final r = await _client.put(Uri.parse('$_api/contents/$path'), headers: _h, body: jsonEncode(body));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Push context failed: ${r.statusCode}');
+  }
+
   Future<void> pushRules(String roomId, String content) async {
     if (_pat.isEmpty) throw Exception('No PAT');
     final path = 'rooms/$roomId/rules.md';
