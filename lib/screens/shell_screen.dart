@@ -14,6 +14,7 @@ import 'rooms_screen.dart';
 import 'prompts_screen.dart';
 import 'search_screen.dart';
 import 'settings_screen.dart';
+import 'clipboard_screen.dart';
 import 'templates_screen.dart';
 
 class ShellScreen extends StatefulWidget {
@@ -31,6 +32,10 @@ class _ShellScreenState extends State<ShellScreen> {
   void initState() {
     super.initState();
     _loadPrompts();
+    // Auto-sync au démarrage
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) _syncPrompts();
+    });
   }
 
   Future<void> _loadPrompts() async {
@@ -134,6 +139,13 @@ class _ShellScreenState extends State<ShellScreen> {
     ));
   }
 
+  void _navigateToClipboard() {
+    Navigator.pop(context);
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => ClipboardScreen(github: widget.github),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     key: _scaffoldKey,
@@ -149,6 +161,7 @@ class _ShellScreenState extends State<ShellScreen> {
       onDashboard: _navigateToDashboard,
       onTemplates: _navigateToTemplates,
       onSearch: _navigateToSearch,
+      onClipboard: _navigateToClipboard,
     ),
     body: HomeScreen(
       github: widget.github,
@@ -173,6 +186,7 @@ class _AppDrawer extends StatelessWidget {
   final VoidCallback onDashboard;
   final VoidCallback onTemplates;
   final VoidCallback onSearch;
+  final VoidCallback onClipboard;
 
   const _AppDrawer({
     required this.github,
@@ -185,6 +199,7 @@ class _AppDrawer extends StatelessWidget {
     required this.onDashboard,
     required this.onTemplates,
     required this.onSearch,
+    required this.onClipboard,
   });
 
   @override
@@ -228,6 +243,7 @@ class _AppDrawer extends StatelessWidget {
             badge: promptCount > 0 ? '$promptCount' : null,
           ),
           _DrawerItem(icon: Icons.cloud_outlined, label: 'OpenSpace', onTap: onOpenSpace),
+          _DrawerItem(icon: Icons.content_paste_rounded, label: 'Presse-papiers', onTap: onClipboard),
           _DrawerItem(icon: Icons.auto_awesome_outlined, label: 'Templates', onTap: onTemplates),
           _DrawerItem(icon: Icons.notifications_outlined, label: 'Notifications', onTap: onNotifications),
 

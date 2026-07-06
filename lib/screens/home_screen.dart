@@ -193,9 +193,30 @@ class _HomeScreenState extends State<HomeScreen> {
           const AppDragHandle(),
           _AttachOption(icon: Icons.folder_outlined, title: 'Fichiers', subtitle: 'Tout type de fichier', onTap: () { Navigator.pop(context); _pickFiles(); }),
           _AttachOption(icon: Icons.photo_library_outlined, title: 'Galerie', subtitle: 'Photos et images', onTap: () { Navigator.pop(context); _pickFromGallery(); }),
+          _AttachOption(icon: Icons.cloud_outlined, title: 'OpenSpace', subtitle: 'Sélectionner depuis l\'OpenSpace', onTap: () { Navigator.pop(context); _pickFromOpenSpace(); }),
           const SizedBox(height: 8),
         ]),
       ),
+    );
+  }
+
+  Future<void> _pickFromOpenSpace() async {
+    final result = await Navigator.push<OpenspaceImage>(
+      context,
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => OpenspaceScreen(github: widget.github, pickMode: true),
+      ),
+    );
+    if (result == null || !mounted) return;
+    final mention = result.mention;
+    final pos = _ctrl.selection.baseOffset;
+    final text = _ctrl.text;
+    final insertAt = pos < 0 ? text.length : pos;
+    final newText = text.substring(0, insertAt) + mention + ' ' + text.substring(insertAt);
+    _ctrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: insertAt + mention.length + 1),
     );
   }
 

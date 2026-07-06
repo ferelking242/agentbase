@@ -83,6 +83,20 @@ class TranscriptEntry {
   }
 }
 
+// ── Clipboard model ──────────────────────────────────────────────────────────
+class ClipboardEntry {
+  final String id;
+  final String content;
+  final DateTime createdAt;
+  ClipboardEntry({required this.id, required this.content, required this.createdAt});
+  factory ClipboardEntry.fromJson(Map<String, dynamic> j) => ClipboardEntry(
+    id: j['id'] as String,
+    content: j['content'] as String,
+    createdAt: DateTime.tryParse(j['createdAt'] as String? ?? '') ?? DateTime.now(),
+  );
+  Map<String, dynamic> toJson() => {'id': id, 'content': content, 'createdAt': createdAt.toIso8601String()};
+}
+
 class GitHubService {
   final String owner, repo;
   String _pat = '';
@@ -623,7 +637,14 @@ class GitHubService {
 
   // ── OpenSpace ─────────────────────────────────────────────────────────────
 
-  Future<List<dynamic>> fetchOpenspaceImages() async {
+  static bool _isVideoExt(String name) {
+    final l = name.toLowerCase();
+    return l.endsWith('.mp4') || l.endsWith('.mov') || l.endsWith('.avi') ||
+           l.endsWith('.webm') || l.endsWith('.mkv') || l.endsWith('.m4v');
+  }
+
+  /// Retourne images ET vidéos du dossier openspace.
+  Future<List<dynamic>> fetchOpenspaceFiles() async {
     try {
       final r = await _client.get(Uri.parse('$_api/contents/openspace'),
           headers: _pat.isNotEmpty ? _h : {});
@@ -632,15 +653,25 @@ class GitHubService {
       final files = (jsonDecode(r.body) as List<dynamic>).where((f) {
         final name = (f['name'] as String).toLowerCase();
         return name.endsWith('.png') || name.endsWith('.jpg') ||
-               name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.webp');
+               name.endsWith('.jpeg') || name.endsWith('.gif') || name.endsWith('.webp') ||
+               _isVideoExt(name);
       }).toList();
       return files.map((f) {
         final name = f['name'] as String;
         final slug = name.replaceAll(' ', '_').replaceAll(RegExp(r'\.[^.]+$'), '');
-        return {'name': name, 'mention': '@$slug', 'rawUrl': '$_raw/openspace/$name', 'sha': f['sha'] as String? ?? ''};
+        return {
+          'name': name,
+          'mention': '@$slug',
+          'rawUrl': '$_raw/openspace/$name',
+          'sha': f['sha'] as String? ?? '',
+          'isVideo': _isVideoExt(name),
+        };
       }).toList();
     } catch (e) { throw Exception('Chargement OpenSpace : $e'); }
   }
+
+  /// Alias legacy.
+  Future<List<dynamic>> fetchOpenspaceImages() => fetchOpenspaceFiles();
 
   Future<Map<String, dynamic>> uploadOpenspaceImage(
       String originalName, Uint8List bytes, List<dynamic> existingImages) async {
@@ -672,5 +703,69 @@ class GitHubService {
     final r = await _client.delete(Uri.parse('$_api/contents/openspace/$name'),
         headers: _h, body: jsonEncode({'message': 'OpenSpace: remove $name', 'sha': sha}));
     if (r.statusCode != 200) throw Exception('Suppression échouée : ${r.statusCode}');
+  }
+
+  // ── Clipboard partagé ─────────────────────────────────────────────────────
+
+  static const _clipPath = 'clipboard/entries.json';
+
+  Future<List<dynamic>> _fetchClipboardRaw() async {
+    final r = await _client.get(Uri.parse('$_api/contents/$_clipPath'),
+        headers: _pat.isNotEmpty ? _h : {});
+    if (r.statusCode == 404) return [];
+    if (r.statusCode != 200) throw Exception('Erreur ${r.statusCode}');
+    final body = jsonDecode(r.body) as Map<String, dynamic>;
+    final content = utf8.decode(base64Decode((body['content'] as String).replaceAll('\n', '')));
+    return jsonDecode(content) as List<dynamic>;
+  }
+
+  Future<String?> _clipboardSha() async {
+    final r = await _client.get(Uri.parse('$_api/contents/$_clipPath'), headers: _h);
+    if (r.statusCode == 404) return null;
+    return (jsonDecode(r.body) as Map<String, dynamic>)['sha'] as String?;
+  }
+
+  Future<List<ClipboardEntry>> fetchClipboardEntries() async {
+    try {
+      final raw = await _fetchClipboardRaw();
+      final list = raw.map((e) => ClipboardEntry.fromJson(e as Map<String, dynamic>)).toList();
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    } catch (_) { return []; }
+  }
+
+  Future<ClipboardEntry> saveClipboardEntry(String content) async {
+    if (_pat.isEmpty) throw Exception('Token GitHub manquant');
+    final entries = await _fetchClipboardRaw().catchError((_) => <dynamic>[]);
+    final entry = ClipboardEntry(
+      id: '${DateTime.now().millisecondsSinceEpoch}',
+      content: content,
+      createdAt: DateTime.now().toUtc(),
+    );
+    entries.insert(0, entry.toJson());
+    final sha = await _clipboardSha();
+    final body = <String, dynamic>{
+      'message': 'Clipboard: add entry',
+      'content': base64Encode(utf8.encode(jsonEncode(entries))),
+      if (sha != null) 'sha': sha,
+    };
+    final r = await _client.put(Uri.parse('$_api/contents/$_clipPath'), headers: _h, body: jsonEncode(body));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Sauvegarde échouée : ${r.statusCode}');
+    return entry;
+  }
+
+  Future<void> deleteClipboardEntry(String id) async {
+    if (_pat.isEmpty) throw Exception('Token GitHub manquant');
+    final raw = await _fetchClipboardRaw();
+    final updated = raw.where((e) => (e as Map<String, dynamic>)['id'] != id).toList();
+    final sha = await _clipboardSha();
+    if (sha == null) return;
+    final body = <String, dynamic>{
+      'message': 'Clipboard: remove $id',
+      'content': base64Encode(utf8.encode(jsonEncode(updated))),
+      'sha': sha,
+    };
+    final r = await _client.put(Uri.parse('$_api/contents/$_clipPath'), headers: _h, body: jsonEncode(body));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Suppression échouée : ${r.statusCode}');
   }
 }
