@@ -496,6 +496,13 @@ class GitHubService {
     } catch (_) { return null; }
   }
 
+  /// Télécharge les bytes bruts d'une URL publique (ex. raw.githubusercontent.com).
+  Future<Uint8List> downloadBytes(String url) async {
+    final r = await _client.get(Uri.parse(url));
+    if (r.statusCode != 200) throw Exception('Téléchargement échoué : ${r.statusCode}');
+    return r.bodyBytes;
+  }
+
   Future<String> _uploadAsset(String path, Uint8List bytes, {String? message}) async {
     String? sha;
     final check = await _client.get(Uri.parse('$_api/contents/$path'), headers: _h);
@@ -736,7 +743,8 @@ class GitHubService {
 
   Future<ClipboardEntry> saveClipboardEntry(String content) async {
     if (_pat.isEmpty) throw Exception('Token GitHub manquant');
-    final entries = await _fetchClipboardRaw().catchError((_) => <dynamic>[]);
+    List<dynamic> entries;
+    try { entries = await _fetchClipboardRaw(); } catch (_) { entries = []; }
     final entry = ClipboardEntry(
       id: '${DateTime.now().millisecondsSinceEpoch}',
       content: content,

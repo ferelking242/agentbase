@@ -209,15 +209,22 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
     if (result == null || !mounted) return;
-    final mention = result.mention;
-    final pos = _ctrl.selection.baseOffset;
-    final text = _ctrl.text;
-    final insertAt = pos < 0 ? text.length : pos;
-    final newText = text.substring(0, insertAt) + mention + ' ' + text.substring(insertAt);
-    _ctrl.value = TextEditingValue(
-      text: newText,
-      selection: TextSelection.collapsed(offset: insertAt + mention.length + 1),
-    );
+
+    // Télécharge les bytes du fichier OpenSpace et l'ajoute comme AttachedFile local
+    // → il sera uploadé en staging et référencé dans le prompt exactement comme
+    //   un fichier choisi depuis la galerie ou les fichiers locaux.
+    try {
+      final resp = await widget.github.downloadBytes(result.rawUrl);
+      if (!mounted) return;
+      final isImg = !result.isVideo;
+      final af = AttachedFile(name: result.name, bytes: resp, isImage: isImg);
+      setState(() {
+        _files.insert(0, af);
+        _startPreUpload(af);
+      });
+    } catch (e) {
+      if (mounted) showAppSnack(context, 'Erreur téléchargement: $e', isError: true);
+    }
   }
 
   /// Start pre-uploading [file] to GitHub in the background immediately.
