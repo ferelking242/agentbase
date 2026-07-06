@@ -10,7 +10,7 @@ import '../services/prefs_service.dart';
 
 /// Generates a unique prompt ID: 13-digit timestamp + 6 random hex chars.
 /// Avoids collisions across devices even at the same millisecond.
-String _generatePromptId() {
+String generatePromptId() {
   final ts  = DateTime.now().millisecondsSinceEpoch;
   final rng = Random.secure();
   final hex = List.generate(6, (_) => rng.nextInt(16).toRadixString(16)).join();

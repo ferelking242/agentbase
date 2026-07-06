@@ -459,7 +459,7 @@ class _HomeScreenState extends State<HomeScreen> {
         } catch (_) {}
       }
 
-      final id = _generatePromptId();
+      final id = generatePromptId();
       String? roomContext;
       if (result.room != null) roomContext = await widget.github.fetchContext(result.room!.id);
       final link   = await widget.github.pushDirectPrompt(id, text, filesCopy,
