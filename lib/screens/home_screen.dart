@@ -46,6 +46,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _ctrl = TextEditingController();
   final ScrollController _scroll = ScrollController();
   final FocusNode _focus = FocusNode();
+  final GlobalKey _attachKey = GlobalKey();
   bool _sending = false;
   List<AttachedFile> _files = [];
 
@@ -182,22 +183,73 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() { _openSpaceQuery = null; });
   }
 
-  void _showAttachMenu() {
-    showModalBottomSheet(
+  void _showAttachMenu() => _showAttachPopup();
+
+  void _showAttachPopup() {
+    final ctx = _attachKey.currentContext;
+    if (ctx == null) return;
+    final box = ctx.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    final btnRect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    final pos = RelativeRect.fromRect(btnRect, Offset.zero & overlay.size);
+    showMenu<String>(
       context: context,
-      backgroundColor: kCard,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (_) => SafeArea(
-        top: false,
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          const AppDragHandle(),
-          _AttachOption(icon: Icons.folder_outlined, title: 'Fichiers', subtitle: 'Tout type de fichier', onTap: () { Navigator.pop(context); _pickFiles(); }),
-          _AttachOption(icon: Icons.photo_library_outlined, title: 'Galerie', subtitle: 'Photos et images', onTap: () { Navigator.pop(context); _pickFromGallery(); }),
-          _AttachOption(icon: Icons.cloud_outlined, title: 'OpenSpace', subtitle: 'Sélectionner depuis l\'OpenSpace', onTap: () { Navigator.pop(context); _pickFromOpenSpace(); }),
-          const SizedBox(height: 8),
-        ]),
+      position: pos,
+      elevation: 12,
+      color: kCard,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: kBorder2, width: 0.5),
       ),
-    );
+      items: [
+        PopupMenuItem(
+          value: 'files',
+          height: 46,
+          child: Row(children: [
+            Container(width: 30, height: 30,
+              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.folder_outlined, color: kAccentMid, size: 16)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Fichiers', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
+              Text('Tout type', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
+            ]),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'gallery',
+          height: 46,
+          child: Row(children: [
+            Container(width: 30, height: 30,
+              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.photo_library_outlined, color: kAccentMid, size: 16)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Galerie', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
+              Text('Photos & images', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
+            ]),
+          ]),
+        ),
+        PopupMenuItem(
+          value: 'openspace',
+          height: 46,
+          child: Row(children: [
+            Container(width: 30, height: 30,
+              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
+              child: const Icon(Icons.cloud_outlined, color: kAccentMid, size: 16)),
+            const SizedBox(width: 10),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('OpenSpace', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
+              Text('Galerie partagée', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
+            ]),
+          ]),
+        ),
+      ],
+    ).then((val) {
+      if (val == 'files') _pickFiles();
+      else if (val == 'gallery') _pickFromGallery();
+      else if (val == 'openspace') _pickFromOpenSpace();
+    });
   }
 
   Future<void> _pickFromOpenSpace() async {
@@ -750,95 +802,140 @@ class _HomeScreenState extends State<HomeScreen> {
     return SafeArea(
       top: false,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
         child: Container(
           decoration: BoxDecoration(
-            color: kCard,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: kBorder, width: 0.5),
+            color: const Color(0xFF1C1C1F),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: kBorder2, width: 1),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4)),
+            ],
           ),
-          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            // Files strip inside the box (only when files attached)
-            if (_files.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
-                child: SizedBox(
-                  height: 72,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _files.length,
-                    separatorBuilder: (_, __) => const SizedBox(width: 6),
-                    itemBuilder: (_, i) {
-                    final f = _files[i];
-                    final uploadFuture = _preUploads[f.name];
-                    return _FileChip(
-                      file: f,
-                      uploadFuture: uploadFuture,
-                      onTap: f.isImage ? () => _showImageFullscreen(f.bytes, f.name) : null,
-                      onLongPress: () => _showFileMenu(i),
-                      onRemove: () => setState(() { _files.removeAt(i); _preUploads.remove(f.name); }),
-                    );
-                  },
-                  ),
-                ),
-              ),
-            // Single row: [+]  [text field]  [⤢] [↑]
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              // + button — leftmost, inside the box
-              GestureDetector(
-                onTap: _showAttachMenu,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 2, 10),
-                  child: Container(
-                    width: 32, height: 32,
-                    decoration: BoxDecoration(color: kCard2, shape: BoxShape.circle),
-                    child: const Icon(Icons.add, size: 18, color: kMuted),
-                  ),
-                ),
-              ),
-              // Text field — fills remaining space
-              Expanded(
-                child: TextField(
-                  controller: _ctrl, focusNode: _focus, maxLines: 6, minLines: 1,
-                  onChanged: (_) => setState(() {}),
-                  style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.5),
-                  cursorColor: kAccent, cursorWidth: 1.5,
-                  decoration: InputDecoration(
-                    hintText: 'Écris ton prompt…',
-                    hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                    isDense: true,
-                  ),
-                ),
-              ),
-              // Fullscreen icon
-              GestureDetector(
-                onTap: _openFullscreen,
-                child: const Padding(
-                  padding: EdgeInsets.fromLTRB(4, 0, 6, 14),
-                  child: Icon(Icons.open_in_full_rounded, size: 15, color: kMuted2),
-                ),
-              ),
-              // Send button
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, 0, 8, 8),
-                child: GestureDetector(
-                  onTap: hasContent ? _send : null,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: 34, height: 34,
-                    decoration: BoxDecoration(
-                      color: hasContent ? kAccent : kCard2,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── Files strip (only when files are attached) ──────────────
+              if (_files.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                  child: SizedBox(
+                    height: 72,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _files.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      itemBuilder: (_, i) {
+                        final f = _files[i];
+                        return _FileChip(
+                          file: f,
+                          uploadFuture: _preUploads[f.name],
+                          onTap: f.isImage ? () => _showImageFullscreen(f.bytes, f.name) : null,
+                          onLongPress: () => _showFileMenu(i),
+                          onRemove: () => setState(() { _files.removeAt(i); _preUploads.remove(f.name); }),
+                        );
+                      },
                     ),
-                    child: Icon(Icons.arrow_upward_rounded, size: 18, color: hasContent ? Colors.white : kMuted2),
                   ),
                 ),
+
+              // ── Input row: [+]  [TextField]  [expand]  [mic]  [↑] ───────
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // + button — left, inside, vertically centred
+                  GestureDetector(
+                    key: _attachKey,
+                    onTap: _showAttachPopup,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+                      child: Container(
+                        width: 30, height: 30,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF2A2A2D),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.add, size: 17, color: kMuted),
+                      ),
+                    ),
+                  ),
+
+                  // TextField — auto-expand, scrollable up to 28 % of screen
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.of(context).size.height * 0.28,
+                      ),
+                      child: SingleChildScrollView(
+                        child: TextField(
+                          controller: _ctrl,
+                          focusNode: _focus,
+                          maxLines: null,
+                          keyboardType: TextInputType.multiline,
+                          textInputAction: TextInputAction.newline,
+                          onChanged: (_) => setState(() {}),
+                          style: GoogleFonts.inter(color: kText, fontSize: 14.5, height: 1.55),
+                          cursorColor: kAccent,
+                          cursorWidth: 1.5,
+                          decoration: InputDecoration(
+                            hintText: 'Écris ton prompt…',
+                            hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14.5),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // Fullscreen expand — subtle, centred
+                  GestureDetector(
+                    onTap: _openFullscreen,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 5),
+                      child: Icon(Icons.open_in_full_rounded, size: 14, color: kSubtle),
+                    ),
+                  ),
+
+                  // Mic button — right, inside, vertically centred
+                  GestureDetector(
+                    onTap: () {}, // voice: hook here when ready
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 5),
+                      child: Icon(Icons.mic_outlined, size: 21, color: kMuted),
+                    ),
+                  ),
+
+                  // Send button — rightmost, inside
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(4, 8, 8, 8),
+                    child: GestureDetector(
+                      onTap: hasContent ? _send : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 34, height: 34,
+                        decoration: BoxDecoration(
+                          color: hasContent ? kAccent : const Color(0xFF2A2A2D),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: hasContent ? Colors.transparent : kBorder,
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.arrow_upward_rounded,
+                          size: 18,
+                          color: hasContent ? Colors.white : kMuted2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ]),
-          ]),
+            ],
+          ),
         ),
       ),
     );

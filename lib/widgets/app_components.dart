@@ -334,27 +334,97 @@ class AppEmptyState extends StatelessWidget {
   );
 }
 
-// ── AppSnack ──────────────────────────────────────────────────────────────────
+// ── AppSnack — top-right overlay toast ───────────────────────────────────────
 void showAppSnack(BuildContext context, String msg, {Color? color, bool isError = false}) {
   final c = isError ? kRed : (color ?? kGreen);
-  ScaffoldMessenger.of(context)
-    ..clearSnackBars()
-    ..showSnackBar(SnackBar(
-      content: Row(children: [
-        Icon(isError ? Icons.error_outline : Icons.check_circle_outline, size: 16, color: c),
-        const SizedBox(width: 8),
-        Expanded(child: Text(msg, style: GoogleFonts.inter(color: kText, fontSize: 13))),
-      ]),
-      backgroundColor: kCard2,
-      duration: const Duration(seconds: 2),
-      margin: const EdgeInsets.all(12),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: kBorder, width: 0.5),
+  final overlay = Overlay.of(context, rootOverlay: true);
+  late OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => _AppToastOverlay(
+      msg: msg,
+      color: c,
+      isError: isError,
+      padding: MediaQuery.of(context).padding,
+      screenWidth: MediaQuery.of(context).size.width,
+    ),
+  );
+  overlay.insert(entry);
+  Future.delayed(const Duration(milliseconds: 2200), () {
+    try { entry.remove(); } catch (_) {}
+  });
+}
+
+class _AppToastOverlay extends StatefulWidget {
+  final String msg;
+  final Color color;
+  final bool isError;
+  final EdgeInsets padding;
+  final double screenWidth;
+  const _AppToastOverlay({
+    required this.msg, required this.color, required this.isError,
+    required this.padding, required this.screenWidth,
+  });
+  @override State<_AppToastOverlay> createState() => _AppToastOverlayState();
+}
+
+class _AppToastOverlayState extends State<_AppToastOverlay> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 250))..forward();
+    _fade  = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(begin: const Offset(0, -0.4), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
+    // Begin fade-out before removal
+    Future.delayed(const Duration(milliseconds: 1700), () {
+      if (mounted) _ctrl.reverse();
+    });
+  }
+
+  @override
+  void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = widget.padding.top + 12;
+    final right = 12.0;
+    final width = (widget.screenWidth * 0.72).clamp(220.0, 360.0);
+    return Positioned(
+      top: top, right: right,
+      width: width,
+      child: SlideTransition(
+        position: _slide,
+        child: FadeTransition(
+          opacity: _fade,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+              decoration: BoxDecoration(
+                color: kCard2,
+                borderRadius: BorderRadius.circular(11),
+                border: Border.all(color: kBorder2, width: 0.5),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withOpacity(0.35), blurRadius: 14, offset: const Offset(0, 4)),
+                ],
+              ),
+              child: Row(children: [
+                Icon(widget.isError ? Icons.error_outline : Icons.check_circle_outline,
+                    size: 16, color: widget.color),
+                const SizedBox(width: 8),
+                Expanded(child: Text(widget.msg,
+                    style: GoogleFonts.inter(color: kText, fontSize: 13, height: 1.4))),
+              ]),
+            ),
+          ),
+        ),
       ),
-      behavior: SnackBarBehavior.floating,
-    ));
+    );
+  }
 }
 
 // ── AppSectionHeader ──────────────────────────────────────────────────────────
