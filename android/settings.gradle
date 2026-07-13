@@ -1,0 +1,13 @@
+include ':app'
+
+def localPropertiesFile = new File(rootProject.projectDir, "local.properties")
+def properties = new Properties()
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { properties.load(it) }
+}
+
+def flutterSdkPath = System.getenv("FLUTTER_ROOT") ?: properties.getProperty("flutter.sdk")
+assert flutterSdkPath != null, "Flutter SDK not found. Set FLUTTER_ROOT or flutter.sdk in local.properties"
+
+// This is the critical step: includes all Flutter plugin subprojects
+apply from: "$flutterSdkPath/packages/flutter_tools/gradle/include_flutter.groovy"
