@@ -8,15 +8,15 @@ import 'package:video_player/video_player.dart';
 
 Future<void> saveToGallery(Uint8List bytes, String name,
     {bool isVideo = false}) async {
+  final dir = await getTemporaryDirectory();
+  final file = File('${dir.path}/$name');
+  await file.writeAsBytes(bytes);
   if (isVideo) {
-    final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/$name');
-    await file.writeAsBytes(bytes);
-    await SaverGallery.saveFile(file.path, name: name, androidRelativePath: 'Movies/AgentBase');
+    await SaverGallery.saveFile(file: file.path, name: name, androidRelativePath: 'Movies/AgentBase');
   } else {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : 'jpg';
     final quality = (ext == 'png') ? 100 : 90;
-    await SaverGallery.saveImage(bytes, quality: quality, name: name, androidRelativePath: 'Pictures/AgentBase');
+    await SaverGallery.saveImage(bytes, quality: quality, androidRelativePath: 'Pictures/AgentBase');
   }
 }
 
