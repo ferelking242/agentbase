@@ -12,11 +12,22 @@ Future<void> saveToGallery(Uint8List bytes, String name,
   final file = File('${dir.path}/$name');
   await file.writeAsBytes(bytes);
   if (isVideo) {
-    await SaverGallery.saveFile(file: file.path, name: name, androidRelativePath: 'Movies/AgentBase');
+    await SaverGallery.saveFile(
+      filePath: file.path,
+      fileName: name,
+      albumPath: 'AgentBase',
+      skipIfExists: false,
+    );
   } else {
     final ext = name.contains('.') ? name.split('.').last.toLowerCase() : 'jpg';
     final quality = (ext == 'png') ? 100 : 90;
-    await SaverGallery.saveImage(bytes, quality: quality, androidRelativePath: 'Pictures/AgentBase');
+    await SaverGallery.saveImage(
+      bytes,
+      quality: quality,
+      fileName: name,
+      albumPath: 'AgentBase',
+      skipIfExists: false,
+    );
   }
 }
 
