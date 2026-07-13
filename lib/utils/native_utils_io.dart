@@ -2,19 +2,21 @@
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
-import 'package:gal/gal.dart';
+import 'package:saver_gallery/saver_gallery.dart';
 import 'package:http/http.dart' as http;
 import 'package:video_player/video_player.dart';
 
 Future<void> saveToGallery(Uint8List bytes, String name,
     {bool isVideo = false}) async {
-  final dir = await getTemporaryDirectory();
-  final file = File('${dir.path}/$name');
-  await file.writeAsBytes(bytes);
   if (isVideo) {
-    await Gal.putVideo(file.path);
+    final dir = await getTemporaryDirectory();
+    final file = File('${dir.path}/$name');
+    await file.writeAsBytes(bytes);
+    await SaverGallery.saveFile(file.path, name: name, androidRelativePath: 'Movies/AgentBase');
   } else {
-    await Gal.putImage(file.path);
+    final ext = name.contains('.') ? name.split('.').last.toLowerCase() : 'jpg';
+    final quality = (ext == 'png') ? 100 : 90;
+    await SaverGallery.saveImage(bytes, quality: quality, name: name, androidRelativePath: 'Pictures/AgentBase');
   }
 }
 
