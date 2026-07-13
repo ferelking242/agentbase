@@ -102,7 +102,7 @@ class _FullscreenComposerScreenState extends State<FullscreenComposerScreen> {
       // Intercepte le swipe-back (iOS) pour aussi restaurer le texte
       body: PopScope(
         canPop: false,
-        onPopInvokedWithResult: (didPop, _) { if (!didPop) _close(); },
+        onPopInvoked: (didPop) { if (!didPop) _close(); },
         child: SafeArea(
           child: Stack(
             children: [

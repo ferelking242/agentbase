@@ -106,15 +106,14 @@ jobs:
       - name: Precache Android artifacts
         run: flutter precache --android
 
-      - name: Generate Gradle files from Flutter template
+      - name: Set up local.properties and Gradle wrapper
         run: |
+          # Only update gradle-wrapper.properties to get the correct Gradle version.
+          # Do NOT overwrite settings.gradle or build.gradle — the project uses the
+          # classic Groovy DSL (include_flutter.groovy) which is required by gal and
+          # other plugins that reference android.flutter.sdkRoot.
           flutter create --org com.aivos --project-name agentbase_temp /tmp/flutter_template
-          cp /tmp/flutter_template/android/settings.gradle android/
-          cp /tmp/flutter_template/android/build.gradle android/
-          cp /tmp/flutter_template/android/app/build.gradle android/app/
           cp /tmp/flutter_template/android/gradle/wrapper/gradle-wrapper.properties android/gradle/wrapper/
-          sed -i 's/com\.aivos\.agentbase_temp/com.aivos.agentbase/g' android/app/build.gradle
-          sed -i 's/applicationId "com\.aivos\.agentbase_temp"/applicationId "com.aivos.agentbase"/g' android/app/build.gradle
           echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
           echo "sdk.dir=$ANDROID_HOME" >> android/local.properties
 
