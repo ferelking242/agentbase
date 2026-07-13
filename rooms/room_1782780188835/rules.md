@@ -10,6 +10,10 @@ workspace/
 └── watchtower-extensions/   ← github.com/ferelking242/watchtower-extensions
 ```
 
+## Références externes (lecture seule)
+
+Pour s'inspirer ou copier du code d'un projet tiers (fork sœur, lib upstream, exemple d'implémentation — ex. `mangayomi`, `mangayomi-extensions`), le cloner dans `external_projects/` à la racine du workspace plutôt que de lire des fragments épars sur le web. Ces clones sont **strictement lecture seule** : on y copie du code vers `watchtower/` ou `watchtower-extensions/`, on n'y pousse jamais.
+
 ## Règles absolues
 
 1. **Push immédiat.** Dès qu'une modification est complète, pousser immédiatement sur `main`. Une tâche finie = un push.
