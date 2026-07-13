@@ -15,7 +15,7 @@ Future<void> saveToGallery(Uint8List bytes, String name,
     await SaverGallery.saveFile(
       filePath: file.path,
       fileName: name,
-      albumPath: 'AgentBase',
+      androidRelativePath: 'Movies/AgentBase',
       skipIfExists: false,
     );
   } else {
@@ -25,7 +25,7 @@ Future<void> saveToGallery(Uint8List bytes, String name,
       bytes,
       quality: quality,
       fileName: name,
-      albumPath: 'AgentBase',
+      androidRelativePath: 'Pictures/AgentBase',
       skipIfExists: false,
     );
   }
