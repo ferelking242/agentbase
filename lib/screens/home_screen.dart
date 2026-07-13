@@ -468,7 +468,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openFullscreen() async {
-    final result = await Navigator.push<SavedPrompt?>(
+    // On utilise Object? pour distinguer deux cas de retour :
+    //   SavedPrompt  → prompt envoyé depuis le full screen
+    //   Map          → utilisateur a fermé (X) → on restaure le texte et les fichiers
+    final result = await Navigator.push<Object?>(
       context,
       MaterialPageRoute(builder: (_) => FullscreenComposerScreen(
         initialText: _ctrl.text,
@@ -477,11 +480,19 @@ class _HomeScreenState extends State<HomeScreen> {
         preloadedRooms: _rooms,
       )),
     );
-    if (result != null) {
+    if (result is SavedPrompt) {
+      // Envoi réussi — on vide le composer principal
       _ctrl.clear();
       setState(() => _files = []);
       widget.onPromptSaved?.call(result);
+    } else if (result is Map) {
+      // Fermeture sans envoi — on restitue le texte + fichiers tapés en full screen
+      final text  = result['text']  as String?           ?? '';
+      final files = result['files'] as List<AttachedFile>? ?? [];
+      _ctrl.text = text;
+      setState(() => _files = List.from(files));
     }
+    // null = swipe back natif sans changement → on ne touche à rien
   }
 
   Future<void> _send() async {
@@ -841,12 +852,13 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-              // ── Zone de texte ──────────────────────────────────────────
+              // ── Zone de texte (max 10 lignes, puis scroll) ─────────────
               Padding(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                 child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.of(context).size.height * 0.28,
+                  constraints: const BoxConstraints(
+                    // 14.5px × 1.55 lineHeight = ~22.5px/ligne × 10 lignes = 225px
+                    maxHeight: 225,
                   ),
                   child: SingleChildScrollView(
                     child: TextField(
@@ -874,8 +886,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
               // ── Barre d'actions : [+] · · · [expand] [mic] [↑] ────────
+              // Pas de séparateur — même couleur de fond que le container.
               Padding(
-                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
