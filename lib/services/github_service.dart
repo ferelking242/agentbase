@@ -227,6 +227,7 @@ class GitHubService {
   Future<String?> fetchContext(String roomId) => _raw_('rooms/$roomId/context.md');
   Future<String?> fetchRoomFile(String roomId, String fileName) => _raw_('rooms/$roomId/$fileName');
   Future<String?> fetchRules(String roomId) => _raw_('rooms/$roomId/rules.md');
+  Future<String?> fetchMemory(String roomId) => _raw_('rooms/$roomId/memory.md');
 
   Future<List<String>> listFiles(String roomId) async {
     try {
@@ -270,6 +271,19 @@ class GitHubService {
     if (sha != null) body['sha'] = sha;
     final r = await _client.put(Uri.parse('$_api/contents/$path'), headers: _h, body: jsonEncode(body));
     if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Push rules failed: ${r.statusCode}');
+  }
+
+  Future<void> pushMemory(String roomId, String content) async {
+    if (_pat.isEmpty) throw Exception('No PAT');
+    final path = 'rooms/$roomId/memory.md';
+    final sha = await _fileSha(path);
+    final body = <String, dynamic>{
+      'message': 'Update memory.md — $roomId',
+      'content': base64Encode(utf8.encode(content)),
+    };
+    if (sha != null) body['sha'] = sha;
+    final r = await _client.put(Uri.parse('$_api/contents/$path'), headers: _h, body: jsonEncode(body));
+    if (r.statusCode != 200 && r.statusCode != 201) throw Exception('Push memory failed: ${r.statusCode}');
   }
 
   Future<List<ChatMessage>> fetchMessages(String roomId) async {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -9,8 +10,30 @@ import '../models/prompt.dart';
 import '../models/message.dart';
 import '../services/github_service.dart';
 import '../services/prefs_service.dart';
+import '../services/agentbase_context.dart';
 import '../theme.dart';
 import '../widgets/app_components.dart';
+
+/// Shared markdown style sheet so bold/italic/headers/lists/links render
+/// consistently everywhere content is shown "flush" on the page (no box).
+MarkdownStyleSheet mdStyleSheet(BuildContext context) => MarkdownStyleSheet(
+  p: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.5),
+  strong: GoogleFonts.inter(color: kText, fontSize: 13.5, height: 1.5, fontWeight: FontWeight.w700),
+  em: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.5, fontStyle: FontStyle.italic),
+  h1: GoogleFonts.inter(color: kText, fontSize: 18, fontWeight: FontWeight.w700),
+  h2: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600),
+  h3: GoogleFonts.inter(color: kText2, fontSize: 13.5, fontWeight: FontWeight.w600),
+  listBullet: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.5),
+  code: GoogleFonts.robotoMono(color: kAccentMid, fontSize: 12.5, backgroundColor: kCard),
+  blockquote: GoogleFonts.inter(color: kMuted2, fontSize: 13.5, fontStyle: FontStyle.italic),
+  a: GoogleFonts.inter(color: kAccentMid, fontSize: 13.5, decoration: TextDecoration.underline),
+  blockquoteDecoration: const BoxDecoration(),
+  codeblockDecoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(6)),
+  h1Padding: const EdgeInsets.only(bottom: 8),
+  h2Padding: const EdgeInsets.only(bottom: 6, top: 4),
+  h3Padding: const EdgeInsets.only(bottom: 4),
+  pPadding: const EdgeInsets.only(bottom: 4),
+);
 
 // ─── Entry point ──────────────────────────────────────────────────────────────
 class RoomDetailScreen extends StatelessWidget {
@@ -20,7 +43,7 @@ class RoomDetailScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => DefaultTabController(
-    length: 6,
+    length: 7,
     child: Scaffold(backgroundColor: kBg, body: _RoomBody(room: room, github: github)),
   );
 }
@@ -38,18 +61,19 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
   String? _context;
   String _rules = '';
   List<String> _rulesList = [];
+  String? _memory;
   List<ChatMessage> _messages = [];
   List<_LocalPrompt> _prompts = [];
   List<TranscriptEntry> _transcripts = [];
   bool _ctxLoading = true, _rulesLoading = true, _chatLoading = true;
-  bool _promptLoading = true, _transcriptLoading = true;
+  bool _promptLoading = true, _transcriptLoading = true, _memoryLoading = true;
   bool _rulesSaving = false, _rulesDirty = false;
-  bool _ctxSaving = false;
+  bool _ctxSaving = false, _memorySaving = false;
 
   @override
   void initState() {
     super.initState();
-    _tab = TabController(length: 6, vsync: this);
+    _tab = TabController(length: 7, vsync: this);
     _tab.addListener(() { if (!_tab.indexIsChanging) _loadTab(_tab.index); });
     _loadTab(0);
   }
@@ -63,6 +87,7 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
     if (i == 3 && _chatLoading) _loadChat();
     if (i == 4 && _transcriptLoading) _loadTranscripts();
     if (i == 5 && _promptLoading) _loadPrompts();
+    if (i == 6 && _memoryLoading) _loadMemory();
   }
 
   Future<void> _loadContext() async {
@@ -76,10 +101,22 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
 
   Future<void> _loadRules() async {
     try {
-      final r = await widget.github.fetchRules(widget.room.id);
-      if (mounted) setState(() { _rules = r ?? ''; _rulesList = _parseRules(r ?? ''); _rulesLoading = false; });
+      final raw = await widget.github.fetchRules(widget.room.id);
+      // Strip the hidden AgentBase context header before showing rules to the
+      // human — that block is only meant for the AI reading the raw file.
+      final visible = stripAgentBaseContext(raw ?? '');
+      if (mounted) setState(() { _rules = visible; _rulesList = _parseRules(visible); _rulesLoading = false; });
     } catch (_) {
       if (mounted) setState(() => _rulesLoading = false);
+    }
+  }
+
+  Future<void> _loadMemory() async {
+    try {
+      final m = await widget.github.fetchMemory(widget.room.id);
+      if (mounted) setState(() { _memory = m; _memoryLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _memoryLoading = false);
     }
   }
 
@@ -130,10 +167,24 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
     if (!widget.github.hasPat) { showAppSnack(context, 'Token GitHub requis', color: kYellow); return; }
     setState(() => _rulesSaving = true);
     try {
-      await widget.github.pushRules(widget.room.id, _rulesToMd());
+      // Re-inject (or refresh) the hidden AgentBase context header on top of
+      // the human-edited rules before pushing — the human never sees it.
+      final full = ensureAgentBaseContext(_rulesToMd(), roomId: widget.room.id, roomName: widget.room.name);
+      await widget.github.pushRules(widget.room.id, full);
       if (mounted) { setState(() { _rulesSaving = false; _rulesDirty = false; }); showAppSnack(context, 'Règles sauvegardées'); }
     } catch (e) {
       if (mounted) { setState(() => _rulesSaving = false); showAppSnack(context, 'Erreur: $e', isError: true); }
+    }
+  }
+
+  Future<void> _saveMemory(String content) async {
+    if (!widget.github.hasPat) { showAppSnack(context, 'Token GitHub requis', color: kYellow); return; }
+    setState(() => _memorySaving = true);
+    try {
+      await widget.github.pushMemory(widget.room.id, content);
+      if (mounted) { setState(() { _memory = content; _memorySaving = false; }); showAppSnack(context, 'Mémoire sauvegardée'); }
+    } catch (e) {
+      if (mounted) { setState(() => _memorySaving = false); showAppSnack(context, 'Erreur: $e', isError: true); }
     }
   }
 
@@ -212,6 +263,7 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
                   Tab(text: 'Chat'),
                   Tab(text: 'Transcription'),
                   Tab(text: 'Prompts'),
+                  Tab(text: 'Mémoire'),
                 ],
               ),
             ),
@@ -247,6 +299,7 @@ class _RoomBodyState extends State<_RoomBody> with SingleTickerProviderStateMixi
           onStatusChanged: (i, s) => setState(() => _prompts[i] = _prompts[i].copyWith(status: s)),
           onSnack: (msg, c) => showAppSnack(context, msg, color: c),
         ),
+        _MemoireTab(content: _memory, loading: _memoryLoading, saving: _memorySaving, onSave: _saveMemory),
       ]),
     );
   }
@@ -659,7 +712,121 @@ class _ContexteTabState extends State<_ContexteTab> {
 
     return Stack(children: [
       ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 90), children: [
-        AppCard(padding: const EdgeInsets.all(16), child: _Markdown(widget.content!)),
+        // Rendered directly on the page — no card/box around it.
+        MarkdownBody(data: widget.content!, styleSheet: mdStyleSheet(context), selectable: true),
+      ]),
+      Positioned(
+        right: 16, bottom: 16,
+        child: AppButton(label: 'Modifier', icon: Icons.edit_outlined,
+          onTap: () => setState(() => _editing = true),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+      ),
+    ]);
+  }
+}
+
+// ─── Tab 6: Mémoire ───────────────────────────────────────────────────────────
+/// Shared memory stash for the room ("open memory stash"): free-form notes
+/// the AI agent reads before acting and updates after meaningful work, so
+/// context survives across sessions without re-explaining everything.
+class _MemoireTab extends StatefulWidget {
+  final String? content;
+  final bool loading, saving;
+  final Future<void> Function(String) onSave;
+  const _MemoireTab({this.content, required this.loading, required this.saving, required this.onSave});
+  @override State<_MemoireTab> createState() => _MemoireTabState();
+}
+
+class _MemoireTabState extends State<_MemoireTab> {
+  bool _editing = false;
+  late TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(text: widget.content ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _MemoireTab old) {
+    super.didUpdateWidget(old);
+    if (!_editing && old.content != widget.content) _ctrl.text = widget.content ?? '';
+  }
+
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Future<void> _save() async {
+    await widget.onSave(_ctrl.text.trim());
+    if (mounted) setState(() => _editing = false);
+  }
+
+  void _cancel() {
+    _ctrl.text = widget.content ?? '';
+    setState(() => _editing = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.loading) return const AppLoadingIndicator();
+
+    if (_editing) {
+      return Column(children: [
+        Expanded(child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Container(
+            decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: kBorder, width: 0.5)),
+            padding: const EdgeInsets.all(14),
+            child: TextField(
+              controller: _ctrl,
+              maxLines: null, expands: true,
+              autofocus: true,
+              textAlignVertical: TextAlignVertical.top,
+              style: GoogleFonts.inter(color: kText, fontSize: 13.5, height: 1.6),
+              cursorColor: kAccent, cursorWidth: 1.5,
+              decoration: InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Notes partagées avec l\'agent : décisions prises, état courant, points à retenir…',
+                hintStyle: GoogleFonts.inter(color: kMuted2),
+              ),
+            ),
+          ),
+        )),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Row(children: [
+            Expanded(child: AppButton(
+              variant: AppButtonVariant.secondary, label: 'Annuler', fullWidth: true,
+              onTap: widget.saving ? null : _cancel,
+            )),
+            const SizedBox(width: 10),
+            Expanded(child: AppButton(
+              label: 'Enregistrer', loading: widget.saving, fullWidth: true,
+              onTap: widget.saving ? null : _save,
+            )),
+          ]),
+        ),
+      ]);
+    }
+
+    if (widget.content == null || widget.content!.isEmpty) {
+      return Stack(children: [
+        const AppEmptyState(
+          icon: Icons.psychology_outlined,
+          title: 'Aucune mémoire partagée',
+          subtitle: 'L\'agent lit et met à jour ces notes entre les sessions — état courant, décisions, contexte utile.',
+        ),
+        Positioned(
+          right: 16, bottom: 16,
+          child: AppButton(label: 'Ajouter des notes', icon: Icons.add,
+            onTap: () => setState(() => _editing = true),
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12)),
+        ),
+      ]);
+    }
+
+    return Stack(children: [
+      ListView(padding: const EdgeInsets.fromLTRB(16, 16, 16, 90), children: [
+        MarkdownBody(data: widget.content!, styleSheet: mdStyleSheet(context), selectable: true),
       ]),
       Positioned(
         right: 16, bottom: 16,
@@ -947,31 +1114,27 @@ class _ChatTabState extends State<_ChatTab> {
               itemBuilder: (_, i) {
                 final m = widget.messages[i];
                 final isMe = m.sender.toLowerCase() == (_agentName?.toLowerCase() ?? '');
+                // No bubble/box — the message content sits directly on the
+                // page background, just indented by sender side.
                 return Align(
                   alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
                   child: Container(
-                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.78),
-                    margin: const EdgeInsets.only(bottom: 8),
+                    constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+                    margin: const EdgeInsets.only(bottom: 14),
                     child: Column(crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start, children: [
-                      if (!isMe) Padding(
-                        padding: const EdgeInsets.only(left: 4, bottom: 3),
-                        child: Text(m.sender, style: GoogleFonts.inter(color: accent, fontSize: 10.5, fontWeight: FontWeight.w600)),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 2, right: 2, bottom: 3),
+                        child: Text(isMe ? 'Toi' : m.sender, style: GoogleFonts.inter(color: accent, fontSize: 10.5, fontWeight: FontWeight.w600)),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                        decoration: BoxDecoration(
-                          color: isMe ? accent : kCard,
-                          borderRadius: BorderRadius.only(
-                            topLeft: const Radius.circular(14), topRight: const Radius.circular(14),
-                            bottomLeft: Radius.circular(isMe ? 14 : 3),
-                            bottomRight: Radius.circular(isMe ? 3 : 14),
-                          ),
-                          border: isMe ? null : Border.all(color: kBorder, width: 0.5),
+                      MarkdownBody(
+                        data: m.content,
+                        selectable: true,
+                        styleSheet: mdStyleSheet(context).copyWith(
+                          p: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.4),
                         ),
-                        child: Text(m.content, style: GoogleFonts.inter(color: isMe ? Colors.white : kText2, fontSize: 13.5, height: 1.4)),
                       ),
                       Padding(
-                        padding: const EdgeInsets.only(top: 3, left: 4, right: 4),
+                        padding: const EdgeInsets.only(top: 3, left: 2, right: 2),
                         child: Text(_fmt(m.createdAt), style: GoogleFonts.inter(color: kMuted2, fontSize: 10)),
                       ),
                     ]),
@@ -1555,32 +1718,3 @@ class _PromptCard extends StatelessWidget {
   }
 }
 
-// ─── Markdown renderer ────────────────────────────────────────────────────────
-class _Markdown extends StatelessWidget {
-  final String content;
-  const _Markdown(this.content);
-
-  @override
-  Widget build(BuildContext context) {
-    final lines = content.split('\n');
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: lines.map((line) {
-        if (line.startsWith('# ')) return Padding(padding: const EdgeInsets.only(bottom: 8),
-          child: Text(line.substring(2), style: GoogleFonts.inter(color: kText, fontSize: 18, fontWeight: FontWeight.w700)));
-        if (line.startsWith('## ')) return Padding(padding: const EdgeInsets.only(bottom: 6, top: 4),
-          child: Text(line.substring(3), style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600)));
-        if (line.startsWith('### ')) return Padding(padding: const EdgeInsets.only(bottom: 4),
-          child: Text(line.substring(4), style: GoogleFonts.inter(color: kText2, fontSize: 13.5, fontWeight: FontWeight.w600)));
-        if (line.startsWith('- ') || line.startsWith('* ')) return Padding(padding: const EdgeInsets.only(bottom: 4),
-          child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Padding(padding: EdgeInsets.only(top: 6, right: 8), child: CircleAvatar(radius: 2, backgroundColor: kMuted2)),
-            Expanded(child: Text(line.substring(2), style: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.5))),
-          ]));
-        if (line.trim().isEmpty) return const SizedBox(height: 6);
-        return Padding(padding: const EdgeInsets.only(bottom: 4),
-          child: Text(line, style: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.5)));
-      }).toList(),
-    );
-  }
-}

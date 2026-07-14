@@ -43,6 +43,19 @@ class PrefsService {
   static const _kAutoSync      = 'auto_sync_enabled';
   static const _kPinnedRooms   = 'pinned_rooms';
   static const _kOnboarding    = 'onboarding_seen';
+  static const _kBgPermission  = 'background_sync_permission'; // null=not asked, 'granted'/'denied'
+
+  // ── Background sync / ntfy reporting permission ────────────────────────────
+  // The app must never poll GitHub or surface agent notifications silently —
+  // the user has to explicitly opt in first.
+  static Future<String?> getBackgroundPermission() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kBgPermission);
+  }
+  static Future<void> setBackgroundPermission(bool granted) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kBgPermission, granted ? 'granted' : 'denied');
+  }
 
   // ── PAT ──────────────────────────────────────────────────────────────────
   static Future<String?> getPat() async {

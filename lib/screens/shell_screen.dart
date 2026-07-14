@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../services/agent_poller_service.dart';
 import '../services/github_service.dart';
 import '../services/prefs_service.dart';
 import '../models/saved_prompt.dart';
@@ -27,6 +29,7 @@ class ShellScreen extends StatefulWidget {
 class _ShellScreenState extends State<ShellScreen> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   List<SavedPrompt> _prompts = [];
+  AgentPollerService? _poller;
 
   @override
   void initState() {
@@ -36,6 +39,55 @@ class _ShellScreenState extends State<ShellScreen> {
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) _syncPrompts();
     });
+    // Le suivi en arrière-plan (poll GitHub + notifications ntfy des agents)
+    // ne démarre jamais sans accord explicite de l'utilisateur.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initBackgroundSync());
+  }
+
+  @override
+  void dispose() {
+    _poller?.stop();
+    super.dispose();
+  }
+
+  Future<void> _initBackgroundSync() async {
+    final decision = await PrefsService.getBackgroundPermission();
+    if (decision == 'granted') {
+      _startPoller();
+      return;
+    }
+    if (decision == 'denied') return; // l'utilisateur a déjà refusé, on ne redemande pas.
+    if (!mounted) return;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: kCard,
+        title: Text('Suivi en arrière-plan', style: GoogleFonts.inter(color: kText, fontWeight: FontWeight.w700)),
+        content: Text(
+          'AgentBase peut vérifier périodiquement les rooms pour signaler les réponses '
+          'des agents (transcriptions, messages) via des notifications. Cela nécessite '
+          'l\'autorisation d\'envoyer des notifications. Rien ne tourne en arrière-plan '
+          'sans ton accord — tu peux changer d\'avis à tout moment dans Paramètres.',
+          style: GoogleFonts.inter(color: kText2, fontSize: 13, height: 1.5),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Refuser', style: GoogleFonts.inter(color: kMuted2))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Autoriser', style: GoogleFonts.inter(color: kAccentMid, fontWeight: FontWeight.w600))),
+        ],
+      ),
+    );
+    await PrefsService.setBackgroundPermission(accepted ?? false);
+    if (accepted == true) {
+      try { await Permission.notification.request(); } catch (_) {}
+      _startPoller();
+    }
+  }
+
+  void _startPoller() {
+    _poller ??= AgentPollerService(github: widget.github)..start();
   }
 
   Future<void> _loadPrompts() async {

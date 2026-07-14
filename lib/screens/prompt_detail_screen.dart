@@ -311,10 +311,9 @@ class _PromptDetailScreenState extends State<PromptDetailScreen> {
               else if (_rawContent == null)
                 const AppEmptyState(icon: Icons.cloud_off, title: 'Non disponible', subtitle: 'Vérifie ta connexion ou ton token')
               else if (_renderMd && !_showMeta)
-                Container(
+                // Rendered directly, no nested box inside the card.
+                SizedBox(
                   width: double.infinity,
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
                   child: MarkdownBody(
                     data: _displayContent,
                     selectable: true,
