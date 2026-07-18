@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/github_service.dart';
+import '../services/gemini_service.dart';
 import '../services/prefs_service.dart';
 import '../theme.dart';
 import '../widgets/app_components.dart';
@@ -26,6 +27,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _themeMode = 'dark';
   bool _autoSync = false;
 
+  // Gemini keys state
+  List<String> _geminiKeys = [];
+  final _geminiNewKeyCtrl = TextEditingController();
+  bool _showNewKey = false;
+
   @override
   void initState() {
     super.initState();
@@ -39,6 +45,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final dataRepo = await PrefsService.getDataRepo();
     final theme    = await PrefsService.getThemeMode();
     final auto     = await PrefsService.getAutoSync();
+    final keys     = await GeminiService.getKeys();
     if (!mounted) return;
     setState(() {
       if (pat != null) _tokenCtrl.text = pat;
@@ -47,6 +54,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _dataRepoCtrl.text = dataRepo;
       _themeMode = theme;
       _autoSync  = auto;
+      _geminiKeys = keys;
     });
   }
 
@@ -56,6 +64,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _ownerCtrl.dispose();
     _repoCtrl.dispose();
     _dataRepoCtrl.dispose();
+    _geminiNewKeyCtrl.dispose();
     super.dispose();
   }
 
@@ -96,6 +105,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await PrefsService.setDataRepo(dataRepo);
     await PrefsService.setThemeMode(_themeMode);
     await PrefsService.setAutoSync(_autoSync);
+    await GeminiService.saveKeys(_geminiKeys);
     widget.github.setPat(pat);
     widget.github.setDataRepo(dataRepo);
     setState(() => _saving = false);
@@ -338,6 +348,73 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Text('Stockées localement (max 80). Accède-y via la cloche 🔔 en haut.',
                     style: GoogleFonts.inter(color: kMuted2, fontSize: 12, height: 1.45)),
                 ])),
+              ]),
+            ),
+            const SizedBox(height: 20),
+
+            // ── Gemini AI Keys ────────────────────────────────────────────
+            const AppSectionHeader('Clés Gemini AI'),
+            AppCard(
+              padding: const EdgeInsets.all(14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  Container(width: 30, height: 30,
+                    decoration: BoxDecoration(color: const Color(0xFF4285F4).withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                    child: const Icon(Icons.auto_awesome, size: 15, color: Color(0xFF4285F4))),
+                  const SizedBox(width: 12),
+                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text('Gemini API Keys', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
+                    Text('Rotation automatique sur erreur 429', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
+                  ])),
+                ]),
+                if (_geminiKeys.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const AppDivider(),
+                  const SizedBox(height: 8),
+                  ..._geminiKeys.asMap().entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: Row(children: [
+                      Container(width: 22, height: 22,
+                        decoration: BoxDecoration(color: const Color(0xFF4285F4).withOpacity(0.1), borderRadius: BorderRadius.circular(5)),
+                        child: Center(child: Text('${e.key + 1}', style: GoogleFonts.inter(color: const Color(0xFF4285F4), fontSize: 10, fontWeight: FontWeight.w700)))),
+                      const SizedBox(width: 8),
+                      Expanded(child: Text(
+                        '${e.value.substring(0, e.value.length > 8 ? 4 : e.value.length)}…${e.value.length > 4 ? e.value.substring(e.value.length - 4) : ""}',
+                        style: GoogleFonts.robotoMono(color: kText2, fontSize: 12),
+                      )),
+                      GestureDetector(
+                        onTap: () => setState(() => _geminiKeys.removeAt(e.key)),
+                        child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.close, size: 14, color: kRed)),
+                      ),
+                    ]),
+                  )),
+                ],
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: AppInput(
+                    controller: _geminiNewKeyCtrl,
+                    hint: 'AIzaSy…',
+                    obscure: !_showNewKey,
+                    suffix: GestureDetector(
+                      onTap: () => setState(() => _showNewKey = !_showNewKey),
+                      child: Icon(_showNewKey ? Icons.visibility_off_outlined : Icons.visibility_outlined, size: 16, color: kMuted2),
+                    ),
+                  )),
+                  const SizedBox(width: 8),
+                  AppButton(
+                    label: 'Ajouter',
+                    onTap: () {
+                      final k = _geminiNewKeyCtrl.text.trim();
+                      if (k.isNotEmpty && !_geminiKeys.contains(k)) {
+                        setState(() { _geminiKeys.add(k); _geminiNewKeyCtrl.clear(); });
+                      }
+                    },
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  ),
+                ]),
+                const SizedBox(height: 8),
+                Text('${_geminiKeys.length} clé${_geminiKeys.length != 1 ? "s" : ""} configurée${_geminiKeys.length != 1 ? "s" : ""}. N\'oublie pas de sauvegarder.',
+                  style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
               ]),
             ),
             const SizedBox(height: 20),

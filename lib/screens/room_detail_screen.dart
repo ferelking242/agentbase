@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -324,8 +327,47 @@ class _AccueilTab extends StatefulWidget {
 class _AccueilTabState extends State<_AccueilTab> {
   final _ctrl = TextEditingController();
   bool _sending = false;
+  String? _bannerImageUrl;
+  bool _bannerLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchLinkedRepoBanner();
+  }
 
   @override void dispose() { _ctrl.dispose(); super.dispose(); }
+
+  Future<void> _fetchLinkedRepoBanner() async {
+    if (widget.room.linkedRepos.isEmpty) { setState(() => _bannerLoaded = true); return; }
+    try {
+      final repoUrl = widget.room.linkedRepos.first;
+      final match = RegExp(r'github\.com/([^/]+)/([^/?#]+)').firstMatch(repoUrl);
+      if (match == null) { setState(() => _bannerLoaded = true); return; }
+      final owner = match.group(1)!;
+      final repo = match.group(2)!.replaceAll('.git', '');
+      final url = 'https://api.github.com/repos/$owner/$repo/readme';
+      final resp = await widget.github.getPublicJson(url);
+      if (resp == null) { if (mounted) setState(() => _bannerLoaded = true); return; }
+      final content = resp['content'] as String? ?? '';
+      final decoded = utf8.decode(base64.decode(content.replaceAll('\n', '')));
+      // Extract first markdown image URL from README
+      final imgMatch = RegExp(r'!\[.*?\]\((https?://[^\)]+)\)').firstMatch(decoded);
+      if (imgMatch != null) {
+        if (mounted) setState(() { _bannerImageUrl = imgMatch.group(1); _bannerLoaded = true; });
+        return;
+      }
+      // Try HTML img tag
+      final htmlMatch = RegExp(r'<img[^>]+src=["\'](https?://[^"\']+)["\']').firstMatch(decoded);
+      if (htmlMatch != null && mounted) {
+        setState(() { _bannerImageUrl = htmlMatch.group(1); _bannerLoaded = true; });
+        return;
+      }
+      if (mounted) setState(() => _bannerLoaded = true);
+    } catch (_) {
+      if (mounted) setState(() => _bannerLoaded = true);
+    }
+  }
 
   void _openUrl(String url) async {
     try { await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication); } catch (_) {}
@@ -363,6 +405,18 @@ class _AccueilTabState extends State<_AccueilTab> {
 
     return ListView(padding: const EdgeInsets.fromLTRB(16, 20, 16, 40), children: [
       // ── Hero ──────────────────────────────────────────────────────────────
+      // Banner from linked repo README (if available)
+      if (_bannerImageUrl != null)
+        ClipRRect(
+          borderRadius: BorderRadius.circular(14),
+          child: CachedNetworkImage(
+            imageUrl: _bannerImageUrl!,
+            height: 140, width: double.infinity,
+            fit: BoxFit.cover,
+            errorWidget: (_, __, ___) => const SizedBox.shrink(),
+          ),
+        ),
+      if (_bannerImageUrl != null) const SizedBox(height: 16),
       Center(child: Column(children: [
         Container(
           width: 72, height: 72,
@@ -389,45 +443,57 @@ class _AccueilTabState extends State<_AccueilTab> {
       ])),
       const SizedBox(height: 20),
 
-      // ── Zone de prompt rapide ────────────────────────────────────────────
+      // ── Zone de prompt rapide (style home screen) ────────────────────────
       Container(
         decoration: BoxDecoration(
-          color: kCard,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: kBorder, width: 0.5),
+          color: kCard2,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: kBorder2, width: 1),
+          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.18), blurRadius: 12, offset: const Offset(0, 3))],
         ),
-        padding: const EdgeInsets.fromLTRB(14, 4, 6, 6),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          Expanded(child: TextField(
-            controller: _ctrl,
-            minLines: 1, maxLines: 5,
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (_) => _send(),
-            style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.4),
-            cursorColor: kAccent,
-            decoration: InputDecoration(
-              hintText: 'Envoyer un prompt à ${room.name}…',
-              hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
-              border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-            ),
-          )),
-          const SizedBox(width: 6),
-          GestureDetector(
-            onTap: (hasContent && !_sending) ? _send : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 34, height: 34,
-              margin: const EdgeInsets.only(bottom: 4),
-              decoration: BoxDecoration(
-                color: hasContent ? accent : kCard2,
-                shape: BoxShape.circle,
-                border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+            child: TextField(
+              controller: _ctrl,
+              minLines: 1, maxLines: 5,
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _send(),
+              style: GoogleFonts.inter(color: kText, fontSize: 14, height: 1.5),
+              cursorColor: accent, cursorWidth: 1.5,
+              decoration: InputDecoration(
+                hintText: 'Envoyer un prompt à ${room.name}…',
+                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
               ),
-              child: _sending
-                  ? const Center(child: SizedBox(width: 13, height: 13, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
-                  : Icon(Icons.arrow_upward_rounded, size: 16, color: hasContent ? Colors.white : kMuted2),
             ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+              const Spacer(),
+              GestureDetector(
+                onTap: (hasContent && !_sending) ? _send : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 34, height: 34,
+                  decoration: BoxDecoration(
+                    color: hasContent ? accent : kCard,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
+                  ),
+                  child: _sending
+                      ? const Center(child: SizedBox(width: 13, height: 13, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
+                      : Icon(Icons.arrow_upward_rounded, size: 16, color: hasContent ? Colors.white : kMuted2),
+                ),
+              ),
+            ]),
           ),
         ]),
       ),
@@ -866,6 +932,19 @@ class _ReglesTabState extends State<_ReglesTab> {
     _ctrl.clear();
   }
 
+  // Watchtower preset rules
+  static const _kWatchtowerRules = [
+    'Cloner le repo dans un dossier racine portant le nom exact du dépôt (ex: git clone ... → /repo-name/)',
+    'Coder proprement : code lisible, nommage explicite, pas de duplication inutile, respect des conventions du projet',
+    'Toujours push le contenu du dossier, jamais le dossier lui-même (push src/, pas push/src)',
+  ];
+
+  void _loadWatchtowerRules() {
+    for (final r in _kWatchtowerRules) {
+      if (!widget.rules.contains(r)) widget.onAdd(r);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (widget.loading) return const AppLoadingIndicator();
@@ -882,6 +961,24 @@ class _ReglesTabState extends State<_ReglesTab> {
             AppButton(label: 'Sauvegarder', loading: widget.saving, onTap: widget.saving ? null : widget.onSave, padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
           ]),
         ),
+      // Watchtower preset button
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+        child: GestureDetector(
+          onTap: _loadWatchtowerRules,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8), border: Border.all(color: kAccent.withOpacity(0.3), width: 0.5)),
+            child: Row(children: [
+              const Icon(Icons.auto_fix_high_rounded, size: 14, color: kAccentMid),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Charger règles Watchtower', style: GoogleFonts.inter(color: kAccentMid, fontSize: 13, fontWeight: FontWeight.w600))),
+              const Icon(Icons.chevron_right_rounded, size: 14, color: kAccentMid),
+            ]),
+          ),
+        ),
+      ),
+      const SizedBox(height: 4),
       Expanded(
         child: widget.rules.isEmpty
             ? const AppEmptyState(icon: Icons.rule_outlined, title: 'Aucune règle', subtitle: 'Ajoute ta première règle ci-dessous')
@@ -988,14 +1085,44 @@ class _ChatTabState extends State<_ChatTab> {
   bool _sending = false;
   String? _agentName;
   bool _nameLoaded = false;
+  Timer? _pollTimer;
+  bool _polling = false;
 
   @override
   void initState() {
     super.initState();
     _loadAgentName();
+    // Poll for new messages every 12 seconds for real-time feel
+    _pollTimer = Timer.periodic(const Duration(seconds: 12), (_) => _pollMessages());
   }
 
-  @override void dispose() { _ctrl.dispose(); _scroll.dispose(); super.dispose(); }
+  @override void dispose() {
+    _pollTimer?.cancel();
+    _ctrl.dispose();
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pollMessages() async {
+    if (_polling || !mounted) return;
+    _polling = true;
+    try {
+      final newMsgs = await widget.github.fetchMessages(widget.room.id);
+      if (!mounted) return;
+      if (newMsgs.length != widget.messages.length) {
+        // New messages arrived — scroll to bottom
+        setState(() {});
+        await Future.delayed(const Duration(milliseconds: 100));
+        if (_scroll.hasClients) {
+          _scroll.animateTo(_scroll.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+        }
+      }
+    } catch (_) {
+    } finally {
+      _polling = false;
+    }
+  }
 
   Future<void> _loadAgentName() async {
     final saved = await PrefsService.getString('agent_name_${widget.room.id}');

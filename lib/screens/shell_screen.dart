@@ -8,6 +8,7 @@ import '../models/saved_prompt.dart';
 import '../theme.dart';
 import '../widgets/app_components.dart';
 import 'dashboard_screen.dart';
+import 'gemini_chat_screen.dart';
 import 'home_screen.dart';
 import 'notifications_screen.dart';
 import 'openspace_screen.dart';
@@ -177,6 +178,7 @@ class _ShellScreenState extends State<ShellScreen> {
     ));
   }
 
+
   void _navigateToTemplates() {
     Navigator.pop(context);
     Navigator.push(context, MaterialPageRoute(
@@ -198,6 +200,13 @@ class _ShellScreenState extends State<ShellScreen> {
     ));
   }
 
+  void _navigateToGeminiChat() {
+    Navigator.pop(context);
+    Navigator.push(context, MaterialPageRoute(
+      builder: (_) => const GeminiChatScreen(),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     key: _scaffoldKey,
@@ -214,6 +223,7 @@ class _ShellScreenState extends State<ShellScreen> {
       onTemplates: _navigateToTemplates,
       onSearch: _navigateToSearch,
       onClipboard: _navigateToClipboard,
+      onGeminiChat: _navigateToGeminiChat,
     ),
     body: HomeScreen(
       github: widget.github,
@@ -239,6 +249,7 @@ class _AppDrawer extends StatelessWidget {
   final VoidCallback onTemplates;
   final VoidCallback onSearch;
   final VoidCallback onClipboard;
+  final VoidCallback onGeminiChat;
 
   const _AppDrawer({
     required this.github,
@@ -252,6 +263,7 @@ class _AppDrawer extends StatelessWidget {
     required this.onTemplates,
     required this.onSearch,
     required this.onClipboard,
+    required this.onGeminiChat,
   });
 
   @override
@@ -298,6 +310,7 @@ class _AppDrawer extends StatelessWidget {
           _DrawerItem(icon: Icons.content_paste_rounded, label: 'Presse-papiers', onTap: onClipboard),
           _DrawerItem(icon: Icons.auto_awesome_outlined, label: 'Templates', onTap: onTemplates),
           _DrawerItem(icon: Icons.notifications_outlined, label: 'Notifications', onTap: onNotifications),
+          _DrawerItem(icon: Icons.psychology_outlined, label: 'Gemini Chat', onTap: onGeminiChat),
 
           const Spacer(),
 

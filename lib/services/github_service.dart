@@ -528,6 +528,18 @@ class GitHubService {
     } catch (_) { return null; }
   }
 
+  /// Fetches a public JSON endpoint (no auth needed, e.g. GitHub REST for public repos).
+  Future<Map<String, dynamic>?> getPublicJson(String url) async {
+    try {
+      final r = await _client.get(Uri.parse(url), headers: {
+        'Accept': 'application/vnd.github+json',
+        if (_pat.isNotEmpty) 'Authorization': 'token $_pat',
+      }).timeout(const Duration(seconds: 10));
+      if (r.statusCode != 200) return null;
+      return jsonDecode(r.body) as Map<String, dynamic>;
+    } catch (_) { return null; }
+  }
+
   /// Télécharge les bytes bruts d'une URL (raw.githubusercontent.com ou autre).
   /// Envoie le token d'authentification si disponible.
   Future<Uint8List> downloadBytes(String url) async {

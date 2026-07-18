@@ -1,10 +1,12 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/github_service.dart';
+import '../services/gemini_service.dart';
 import '../services/prefs_service.dart';
 import '../models/saved_prompt.dart';
 import '../models/room.dart';
@@ -68,6 +70,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<Room> _rooms = [];
 
+  // Direct send state (no SendSheet dialog)
+  String _promptName = '';
+  Room? _selectedRoom;
+  bool _geminiImproving = false;
+
   @override
   void initState() {
     super.initState();
@@ -103,6 +110,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _onCtrlChange() {
+    // Update auto-generated prompt name
+    final trimmed = _ctrl.text.trim();
+    final newName = _smartTitle(trimmed);
+    if (newName != _promptName) setState(() => _promptName = newName);
+
     final pos = _ctrl.selection.baseOffset;
     if (!_ctrl.selection.isValid || pos < 0 || pos > _ctrl.text.length) {
       if (_mentionQuery != null || _openSpaceQuery != null) {
@@ -183,100 +195,56 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() { _openSpaceQuery = null; });
   }
 
-  void _showAttachMenu() => _showAttachPopup();
+  void _showAttachMenu() => _showAttachSheet();
 
-  void _showAttachPopup() {
-    final ctx = _attachKey.currentContext;
-    if (ctx == null) return;
-    final box = ctx.findRenderObject() as RenderBox;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    final btnRect = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
-    final pos = RelativeRect.fromRect(btnRect, Offset.zero & overlay.size);
-    showMenu<String>(
+  void _showAttachSheet() {
+    showModalBottomSheet(
       context: context,
-      position: pos,
-      elevation: 12,
-      color: kCard,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: kBorder2, width: 0.5),
-      ),
-      items: [
-        PopupMenuItem(
-          value: 'files',
-          height: 46,
-          child: Row(children: [
-            Container(width: 30, height: 30,
-              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.folder_outlined, color: kAccentMid, size: 16)),
-            const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Fichiers', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
-              Text('Tout type', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
-            ]),
-          ]),
-        ),
-        PopupMenuItem(
-          value: 'gallery',
-          height: 46,
-          child: Row(children: [
-            Container(width: 30, height: 30,
-              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.photo_library_outlined, color: kAccentMid, size: 16)),
-            const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('Galerie', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
-              Text('Photos & images', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
-            ]),
-          ]),
-        ),
-        PopupMenuItem(
-          value: 'openspace',
-          height: 46,
-          child: Row(children: [
-            Container(width: 30, height: 30,
-              decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)),
-              child: const Icon(Icons.cloud_outlined, color: kAccentMid, size: 16)),
-            const SizedBox(width: 10),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('OpenSpace', style: GoogleFonts.inter(color: kText, fontSize: 13.5, fontWeight: FontWeight.w500)),
-              Text('Galerie partagée', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
-            ]),
-          ]),
-        ),
-      ],
-    ).then((val) {
-      if (val == 'files') _pickFiles();
-      else if (val == 'gallery') _pickFromGallery();
-      else if (val == 'openspace') _pickFromOpenSpace();
-    });
-  }
-
-  Future<void> _pickFromOpenSpace() async {
-    final result = await Navigator.push<OpenspaceImage>(
-      context,
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => OpenspaceScreen(github: widget.github, pickMode: true),
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AttachSheet(
+        github: widget.github,
+        onFiles: () { Navigator.pop(context); _pickFiles(); },
+        onGallery: () { Navigator.pop(context); _pickFromGallery(); },
+        onCamera: () { Navigator.pop(context); _pickFromCamera(); },
+        onOpenSpacePick: (img) async {
+          Navigator.pop(context);
+          await _handleOpenSpaceImagePick(img);
+        },
       ),
     );
-    if (result == null || !mounted) return;
+  }
 
-    // Télécharge les bytes du fichier OpenSpace et l'ajoute comme AttachedFile local
-    // → il sera uploadé en staging et référencé dans le prompt exactement comme
-    //   un fichier choisi depuis la galerie ou les fichiers locaux.
+  Future<void> _handleOpenSpaceImagePick(OpenspaceImage img) async {
     try {
-      final resp = await widget.github.downloadBytes(result.rawUrl);
+      final resp = await widget.github.downloadBytes(img.rawUrl);
       if (!mounted) return;
-      final isImg = !result.isVideo;
-      final af = AttachedFile(name: result.name, bytes: resp, isImage: isImg);
-      setState(() {
-        _files.insert(0, af);
-        _startPreUpload(af);
-      });
+      final isImg = !img.isVideo;
+      final af = AttachedFile(name: img.name, bytes: resp, isImage: isImg);
+      setState(() { _files.insert(0, af); _startPreUpload(af); });
     } catch (e) {
       if (mounted) showAppSnack(context, 'Erreur téléchargement: $e', isError: true);
     }
+  }
+
+  Future<void> _pickFromCamera() async {
+    try {
+      final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 90);
+      if (img == null || !mounted) return;
+      final bytes = await img.readAsBytes();
+      final fromName = img.name;
+      final fromPath = img.path.split('/').last.split('\\').last;
+      String name;
+      if (!_isTempName(fromName)) {
+        name = fromName;
+      } else if (!_isTempName(fromPath)) {
+        name = fromPath;
+      } else {
+        name = _stampName(0);
+      }
+      final af = AttachedFile(name: name, bytes: bytes, isImage: true);
+      if (mounted) setState(() { _files.insert(0, af); _startPreUpload(af); });
+    } catch (_) {}
   }
 
   /// Start pre-uploading [file] to GitHub in the background immediately.
@@ -497,30 +465,22 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _send() async {
     if (_ctrl.text.trim().isEmpty && _files.isEmpty) return;
-    final defaultName = _smartTitle(_ctrl.text.trim());
-    final result = await showModalBottomSheet<SendResult>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => SendSheet(promptText: _ctrl.text.trim(), preloadedRooms: _rooms, github: widget.github),
-    );
-    if (result == null) return;
-
+    final name = _promptName.isNotEmpty ? _promptName : _smartTitle(_ctrl.text.trim());
     final text        = _ctrl.text;
     final filesCopy   = List<AttachedFile>.from(_files);
     final preUploads  = Map<String, Future<String?>>.from(_preUploads);
     setState(() {
-      _msgs.add(_Msg.user(text, filesCopy, result.room));
+      _msgs.add(_Msg.user(text, filesCopy, _selectedRoom));
       _ctrl.clear();
       _files = [];
       _preUploads.clear();
-      _stagingId = _newStagingId(); // fresh staging ID for next draft
+      _stagingId = _newStagingId();
+      _promptName = '';
       _sending = true;
     });
     _scrollBottom();
 
     try {
-      // Await all pre-uploads that finished (timeout 1s so we don't block long)
       final resolvedUrls = <String, String>{};
       for (final entry in preUploads.entries) {
         try {
@@ -531,10 +491,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
       final id = generatePromptId();
       String? roomContext;
-      if (result.room != null) roomContext = await widget.github.fetchContext(result.room!.id);
+      if (_selectedRoom != null) roomContext = await widget.github.fetchContext(_selectedRoom!.id);
       final link   = await widget.github.pushDirectPrompt(id, text, filesCopy,
-        room: result.room, roomContext: roomContext, preUploadedUrls: resolvedUrls);
-      final name   = result.name.isNotEmpty ? result.name : defaultName;
+        room: _selectedRoom, roomContext: roomContext, preUploadedUrls: resolvedUrls);
       final prompt = SavedPrompt(id: id, name: name, link: link, created: DateTime.now());
       final saved  = await PrefsService.addPrompt(prompt);
       if (!mounted) return;
@@ -549,6 +508,115 @@ class _HomeScreenState extends State<HomeScreen> {
       });
     }
     _scrollBottom();
+  }
+
+  // ── Gemini improve prompt ──────────────────────────────────────────────────
+  Future<void> _showGeminiImprove() async {
+    if (!GeminiService().hasKeys) {
+      showAppSnack(context, 'Configure tes clés Gemini dans Paramètres', color: kYellow);
+      return;
+    }
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) { showAppSnack(context, 'Écris quelque chose d\'abord'); return; }
+
+    setState(() => _geminiImproving = true);
+    String? roomCtx;
+    if (_selectedRoom != null) {
+      try { roomCtx = await widget.github.fetchContext(_selectedRoom!.id); } catch (_) {}
+    }
+    final results = await Future.wait([
+      GeminiService().improvePrompt(text, roomContext: roomCtx, roomName: _selectedRoom?.name),
+      GeminiService().suggestName(text, roomContext: roomCtx, roomName: _selectedRoom?.name),
+    ]);
+    if (!mounted) return;
+    setState(() => _geminiImproving = false);
+
+    if (!results[0].success) {
+      if (mounted) showAppSnack(context, results[0].error ?? 'Erreur Gemini', isError: true);
+      return;
+    }
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _GeminiImproveSheet(
+        original: text,
+        improved: results[0].text,
+        suggestedName: results[1].success ? results[1].text : '',
+        onAccept: (newText, name) {
+          _ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+          if (name.isNotEmpty) setState(() => _promptName = name);
+          setState(() {});
+        },
+      ),
+    );
+  }
+
+  // ── Edit prompt name ───────────────────────────────────────────────────────
+  Future<void> _showNameDialog() async {
+    final autoName = _promptName.isNotEmpty ? _promptName : _smartTitle(_ctrl.text.trim());
+    final ctrl = TextEditingController(text: autoName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: kBorder, width: 0.5)),
+        title: Text('Nom du prompt', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600)),
+        content: AppInput(
+          controller: ctrl, autofocus: true,
+          hint: 'Ex: Analyse de performance UI',
+          onSubmitted: (v) => Navigator.pop(_, v.trim()),
+          suffix: GestureDetector(onTap: () => ctrl.clear(),
+            child: const Padding(padding: EdgeInsets.all(12), child: Icon(Icons.close, size: 16, color: kMuted2))),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(_), child: Text('Annuler', style: GoogleFonts.inter(color: kMuted))),
+          AppButton(label: 'OK', onTap: () => Navigator.pop(_, ctrl.text.trim()), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (newName != null && newName.isNotEmpty && mounted) setState(() => _promptName = newName);
+  }
+
+  // ── Room picker ────────────────────────────────────────────────────────────
+  Future<void> _showRoomPicker() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(color: kCard, borderRadius: BorderRadius.vertical(top: Radius.circular(16)), border: Border(top: BorderSide(color: kBorder, width: 0.5))),
+        child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const AppDragHandle(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text('Assigner à une room', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w700)),
+          ),
+          const AppDivider(),
+          SizedBox(
+            height: 60,
+            child: _rooms.isEmpty
+                ? const Center(child: CircularProgressIndicator(color: kAccent, strokeWidth: 2))
+                : ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    children: [
+                      RoomChip(label: 'Aucune', selected: _selectedRoom == null,
+                        onTap: () { setState(() => _selectedRoom = null); Navigator.pop(context); }),
+                      ..._rooms.map((r) => RoomChip(
+                        label: r.name, icon: r.iconData, color: r.accentColor,
+                        selected: _selectedRoom?.id == r.id,
+                        onTap: () { setState(() => _selectedRoom = r); Navigator.pop(context); },
+                      )),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 8),
+        ])),
+      ),
+    );
   }
 
   void _scrollBottom() {
@@ -810,13 +878,16 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildInput() {
     final hasContent = _ctrl.text.trim().isNotEmpty || _files.isNotEmpty;
+    final displayName = _promptName.isNotEmpty
+        ? (_promptName.length > 28 ? '${_promptName.substring(0, 25)}…' : _promptName)
+        : '';
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
         child: Container(
           decoration: BoxDecoration(
-            color: const Color(0xFF1C1C1F),
+            color: kCard2,
             borderRadius: BorderRadius.circular(22),
             border: Border.all(color: kBorder2, width: 1),
             boxShadow: [
@@ -856,10 +927,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    // 14.5px × 1.55 lineHeight = ~22.5px/ligne × 10 lignes = 225px
-                    maxHeight: 225,
-                  ),
+                  constraints: const BoxConstraints(maxHeight: 225),
                   child: SingleChildScrollView(
                     child: TextField(
                       controller: _ctrl,
@@ -877,6 +945,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         border: InputBorder.none,
                         enabledBorder: InputBorder.none,
                         focusedBorder: InputBorder.none,
+                        filled: true,
+                        fillColor: Colors.transparent,
                         contentPadding: EdgeInsets.zero,
                         isDense: true,
                       ),
@@ -885,17 +955,82 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              // ── Barre d'actions : [+] · · · [expand] [mic] [↑] ────────
-              // Pas de séparateur — même couleur de fond que le container.
+              // ── Nom + room (visible quand il y a du contenu) ───────────
+              if (hasContent)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                  child: Row(children: [
+                    // Room chip
+                    GestureDetector(
+                      onTap: _showRoomPicker,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _selectedRoom != null
+                              ? _selectedRoom!.accentColor.withOpacity(0.1)
+                              : kCard,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _selectedRoom != null
+                                ? _selectedRoom!.accentColor.withOpacity(0.4)
+                                : kBorder,
+                            width: 0.5,
+                          ),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(
+                            _selectedRoom != null ? _selectedRoom!.iconData : Icons.workspaces_outlined,
+                            size: 11,
+                            color: _selectedRoom != null ? _selectedRoom!.accentColor : kMuted2,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _selectedRoom?.name ?? 'Room',
+                            style: GoogleFonts.inter(
+                              color: _selectedRoom != null ? _selectedRoom!.accentColor : kMuted2,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ]),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Name pill
+                    if (displayName.isNotEmpty)
+                      Flexible(
+                        child: GestureDetector(
+                          onTap: _showNameDialog,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: kCard,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: kBorder, width: 0.5),
+                            ),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              const Icon(Icons.edit_note_rounded, size: 11, color: kMuted2),
+                              const SizedBox(width: 4),
+                              Flexible(child: Text(displayName,
+                                style: GoogleFonts.inter(color: kMuted2, fontSize: 11),
+                                maxLines: 1, overflow: TextOverflow.ellipsis)),
+                            ]),
+                          ),
+                        ),
+                      ),
+                  ]),
+                ),
+
+              // ── Barre d'actions : [+] [room] [spacer] [✨] [📝] [↑] ──
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Bouton [+]
+                    // [+] Attach
                     GestureDetector(
                       key: _attachKey,
-                      onTap: _showAttachPopup,
+                      onTap: _showAttachMenu,
                       child: Container(
                         width: 32, height: 32,
                         decoration: const BoxDecoration(
@@ -912,21 +1047,35 @@ class _HomeScreenState extends State<HomeScreen> {
                     GestureDetector(
                       onTap: _openFullscreen,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: const Icon(Icons.open_in_full_rounded, size: 14, color: kSubtle),
                       ),
                     ),
 
-                    // Micro
+                    // ✨ Gemini improve
                     GestureDetector(
-                      onTap: () {},
+                      onTap: _geminiImproving ? null : _showGeminiImprove,
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6),
-                        child: const Icon(Icons.mic_outlined, size: 21, color: kMuted),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: _geminiImproving
+                            ? const SizedBox(width: 20, height: 20,
+                                child: CircularProgressIndicator(color: Color(0xFF4285F4), strokeWidth: 1.5))
+                            : const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF4285F4)),
                       ),
                     ),
 
-                    // Envoyer
+                    // 📝 Edit name
+                    GestureDetector(
+                      onTap: _showNameDialog,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: const Icon(Icons.edit_note_rounded, size: 19, color: kMuted),
+                      ),
+                    ),
+
+                    const SizedBox(width: 4),
+
+                    // ↑ Envoyer
                     GestureDetector(
                       onTap: hasContent ? _send : null,
                       child: AnimatedContainer(
@@ -935,16 +1084,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         decoration: BoxDecoration(
                           color: hasContent ? kAccent : const Color(0xFF2A2A2D),
                           shape: BoxShape.circle,
-                          border: Border.all(
-                            color: hasContent ? Colors.transparent : kBorder,
-                            width: 0.5,
-                          ),
+                          border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
                         ),
-                        child: Icon(
-                          Icons.arrow_upward_rounded,
-                          size: 18,
-                          color: hasContent ? Colors.white : kMuted2,
-                        ),
+                        child: Icon(Icons.arrow_upward_rounded, size: 18,
+                          color: hasContent ? Colors.white : kMuted2),
                       ),
                     ),
                   ],
@@ -1478,4 +1621,382 @@ class _ABLogoPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── _AttachSheet ──────────────────────────────────────────────────────────────
+/// ChatGPT-style attachment picker. Shows as a bottom sheet with options.
+/// When OpenSpace is selected, displays the image/video grid inline.
+class _AttachSheet extends StatefulWidget {
+  final GitHubService github;
+  final VoidCallback onFiles;
+  final VoidCallback onGallery;
+  final VoidCallback onCamera;
+  final Future<void> Function(OpenspaceImage) onOpenSpacePick;
+
+  const _AttachSheet({
+    required this.github,
+    required this.onFiles,
+    required this.onGallery,
+    required this.onCamera,
+    required this.onOpenSpacePick,
+  });
+
+  @override
+  State<_AttachSheet> createState() => _AttachSheetState();
+}
+
+class _AttachSheetState extends State<_AttachSheet> {
+  bool _showOpenSpace = false;
+  List<dynamic> _osFiles = [];
+  bool _osLoading = false;
+  String _osSearch = '';
+  final _osSearchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _osSearchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadOpenSpace() async {
+    setState(() => _osLoading = true);
+    try {
+      final files = await widget.github.fetchOpenspaceFiles();
+      if (mounted) setState(() { _osFiles = files; _osLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _osLoading = false);
+    }
+  }
+
+  void _openOpenSpace() {
+    setState(() => _showOpenSpace = true);
+    _loadOpenSpace();
+  }
+
+  List<dynamic> get _filtered {
+    if (_osSearch.isEmpty) return _osFiles;
+    final q = _osSearch.toLowerCase();
+    return _osFiles.where((f) => (f['name'] as String).toLowerCase().contains(q)).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: kCard,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          border: Border(top: BorderSide(color: kBorder, width: 0.5)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: _showOpenSpace ? _buildOpenSpace() : _buildMenu(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenu() => Column(mainAxisSize: MainAxisSize.min, children: [
+    const AppDragHandle(),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      child: Column(children: [
+        _AttachOption(
+          icon: Icons.photo_camera_outlined,
+          title: 'Caméra',
+          subtitle: 'Prendre une photo',
+          color: kGreen,
+          onTap: widget.onCamera,
+        ),
+        const SizedBox(height: 2),
+        _AttachOption(
+          icon: Icons.photo_library_outlined,
+          title: 'Galerie',
+          subtitle: 'Photos & vidéos',
+          color: kAccentMid,
+          onTap: widget.onGallery,
+        ),
+        const SizedBox(height: 2),
+        _AttachOption(
+          icon: Icons.folder_outlined,
+          title: 'Fichiers',
+          subtitle: 'Tout type de fichier',
+          color: kYellow,
+          onTap: widget.onFiles,
+        ),
+        const SizedBox(height: 2),
+        _AttachOption(
+          icon: Icons.cloud_outlined,
+          title: 'OpenSpace',
+          subtitle: 'Galerie partagée',
+          color: const Color(0xFF8B5CF6),
+          onTap: _openOpenSpace,
+        ),
+      ]),
+    ),
+  ]);
+
+  Widget _buildOpenSpace() => Column(mainAxisSize: MainAxisSize.min, children: [
+    // Header with back button and search
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () => setState(() { _showOpenSpace = false; _osSearch = ''; _osSearchCtrl.clear(); }),
+          child: Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+            child: const Icon(Icons.arrow_back_ios_new, size: 13, color: kMuted),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: 34,
+            decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: TextField(
+              controller: _osSearchCtrl,
+              onChanged: (v) => setState(() => _osSearch = v),
+              style: GoogleFonts.inter(color: kText, fontSize: 13),
+              cursorColor: kAccent,
+              decoration: InputDecoration(
+                hintText: 'Rechercher…',
+                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 13),
+                border: InputBorder.none,
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+                prefixIcon: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.search, size: 16, color: kMuted2)),
+                prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    ),
+    const AppDivider(),
+    // Content
+    ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: _osLoading
+          ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: kAccent, strokeWidth: 2)))
+          : _filtered.isEmpty
+              ? Center(child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Text(_osFiles.isEmpty ? 'Aucun fichier dans OpenSpace' : 'Aucun résultat',
+                    style: GoogleFonts.inter(color: kMuted2, fontSize: 13)),
+                ))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8),
+                  itemCount: _filtered.length,
+                  itemBuilder: (_, i) {
+                    final f = _filtered[i] as Map<String, dynamic>;
+                    final name = f['name'] as String;
+                    final rawUrl = f['rawUrl'] as String;
+                    final isVideo = f['isVideo'] as bool? ?? false;
+                    return GestureDetector(
+                      onTap: () async {
+                        final img = OpenspaceImage(
+                          name: name,
+                          mention: f['mention'] as String? ?? '@$name',
+                          rawUrl: rawUrl,
+                          sha: f['sha'] as String? ?? '',
+                          isVideo: isVideo,
+                        );
+                        await widget.onOpenSpacePick(img);
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Stack(fit: StackFit.expand, children: [
+                          isVideo
+                              ? Container(color: kCard2, child: const Icon(Icons.videocam_outlined, color: kMuted2, size: 28))
+                              : CachedNetworkImage(
+                                  imageUrl: rawUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) => Container(color: kCard2),
+                                  errorWidget: (_, __, ___) => Container(color: kCard2, child: const Icon(Icons.broken_image_outlined, color: kMuted2, size: 20)),
+                                ),
+                          if (isVideo)
+                            Positioned(top: 4, left: 4, child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+                              child: const Icon(Icons.play_arrow, size: 12, color: Colors.white),
+                            )),
+                          Positioned(bottom: 0, left: 0, right: 0, child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                            color: Colors.black.withOpacity(0.5),
+                            child: Text(name, style: GoogleFonts.inter(color: Colors.white70, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          )),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+    ),
+    const SizedBox(height: 8),
+  ]);
+}
+
+class _AttachOption extends StatelessWidget {
+  final IconData icon;
+  final String title, subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AttachOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    behavior: HitTestBehavior.opaque,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        Container(
+          width: 42, height: 42,
+          decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(11)),
+          child: Icon(icon, size: 20, color: color),
+        ),
+        const SizedBox(width: 14),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: GoogleFonts.inter(color: kText, fontSize: 14.5, fontWeight: FontWeight.w500)),
+          Text(subtitle, style: GoogleFonts.inter(color: kMuted2, fontSize: 12)),
+        ]),
+        const Spacer(),
+        const Icon(Icons.chevron_right_rounded, size: 18, color: kMuted2),
+      ]),
+    ),
+  );
+}
+
+// ── _GeminiImproveSheet ───────────────────────────────────────────────────────
+class _GeminiImproveSheet extends StatefulWidget {
+  final String original;
+  final String improved;
+  final String suggestedName;
+  final void Function(String text, String name) onAccept;
+
+  const _GeminiImproveSheet({
+    required this.original,
+    required this.improved,
+    required this.suggestedName,
+    required this.onAccept,
+  });
+
+  @override
+  State<_GeminiImproveSheet> createState() => _GeminiImproveSheetState();
+}
+
+class _GeminiImproveSheetState extends State<_GeminiImproveSheet> {
+  bool _showOriginal = false;
+  late final TextEditingController _nameCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.suggestedName);
+  }
+
+  @override
+  void dispose() { _nameCtrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+    child: Container(
+      decoration: const BoxDecoration(
+        color: kCard,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border(top: BorderSide(color: kBorder, width: 0.5)),
+      ),
+      child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const AppDragHandle(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+          child: Row(children: [
+            Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF4285F4), Color(0xFF9C27B0)]),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.auto_awesome, size: 14, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Text('Prompt amélioré par Gemini', style: GoogleFonts.inter(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => setState(() => _showOriginal = !_showOriginal),
+              child: Text(_showOriginal ? 'Voir amélioré' : 'Voir original',
+                style: GoogleFonts.inter(color: kAccentMid, fontSize: 12)),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(maxHeight: 160),
+          decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+          child: SingleChildScrollView(
+            child: Text(
+              _showOriginal ? widget.original : widget.improved,
+              style: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.6),
+            ),
+          ),
+        ),
+        if (widget.suggestedName.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Nom suggéré', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              AppInput(
+                controller: _nameCtrl,
+                hint: 'Nom du prompt',
+                suffix: GestureDetector(
+                  onTap: () => _nameCtrl.text = widget.suggestedName,
+                  child: const Padding(padding: EdgeInsets.all(12), child: Icon(Icons.refresh, size: 16, color: kMuted2)),
+                ),
+              ),
+            ]),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Expanded(child: AppButton(
+              label: 'Refuser', variant: AppButtonVariant.outline, fullWidth: true,
+              onTap: () => Navigator.pop(context),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+            )),
+            const SizedBox(width: 10),
+            Expanded(flex: 2, child: AppButton(
+              label: 'Accepter',
+              fullWidth: true,
+              onTap: () {
+                widget.onAccept(widget.improved, _nameCtrl.text.trim());
+                Navigator.pop(context);
+              },
+              padding: const EdgeInsets.symmetric(vertical: 13),
+            )),
+          ]),
+        ),
+        const SizedBox(height: 4),
+      ])),
+    ),
+  );
 }
