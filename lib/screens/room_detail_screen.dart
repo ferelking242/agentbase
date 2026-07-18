@@ -358,7 +358,7 @@ class _AccueilTabState extends State<_AccueilTab> {
         return;
       }
       // Try HTML img tag
-      final htmlMatch = RegExp(r'<img[^>]+src=["\'](https?://[^"\']+)["\']').firstMatch(decoded);
+      final htmlMatch = RegExp('<img[^>]+src=["\'](https?://[^"\']+)["\']').firstMatch(decoded);
       if (htmlMatch != null && mounted) {
         setState(() { _bannerImageUrl = htmlMatch.group(1); _bannerLoaded = true; });
         return;

@@ -1290,19 +1290,6 @@ class _SuggCard extends StatelessWidget {
   );
 }
 
-class _AttachOption extends StatelessWidget {
-  final IconData icon; final String title, subtitle; final VoidCallback onTap;
-  const _AttachOption({required this.icon, required this.title, required this.subtitle, required this.onTap});
-  @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-    leading: Container(width: 40, height: 40, decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(10)), child: Icon(icon, color: kAccentMid, size: 20)),
-    title: Text(title, style: GoogleFonts.inter(color: kText, fontSize: 14, fontWeight: FontWeight.w500)),
-    subtitle: Text(subtitle, style: GoogleFonts.inter(color: kMuted2, fontSize: 12)),
-    onTap: onTap,
-  );
-}
-
 // ── Msg model ─────────────────────────────────────────────────────────────────
 enum _MsgKind { user, promptSaved, agentError }
 
