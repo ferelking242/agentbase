@@ -1268,38 +1268,73 @@ class _ChatTabState extends State<_ChatTab> {
                   ),
                 );
               })),
-      Container(
-        decoration: const BoxDecoration(color: kBg, border: Border(top: BorderSide(color: kBorder, width: 0.5))),
-        padding: EdgeInsets.only(left: 14, right: 14, top: 8, bottom: MediaQuery.of(context).padding.bottom + 8),
-        child: Row(children: [
-          Expanded(child: Container(
-            decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(22), border: Border.all(color: kBorder, width: 0.5)),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-            child: TextField(
-              controller: _ctrl, maxLines: 4, minLines: 1,
-              onSubmitted: (_) => _send(),
-              style: GoogleFonts.inter(color: kText, fontSize: 13.5),
-              cursorColor: kAccent, cursorWidth: 1.5,
-              decoration: InputDecoration(
-                border: InputBorder.none,
-                hintText: _agentName == null ? 'Choisir un nom pour commencer…' : 'Envoyer un message…',
-                hintStyle: GoogleFonts.inter(color: kMuted2),
-                contentPadding: EdgeInsets.zero, isDense: true,
-              ),
+      SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+          child: Container(
+            decoration: BoxDecoration(
+              color: kCard2,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: kBorder2, width: 1),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4)),
+              ],
             ),
-          )),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: _sending ? null : (_agentName == null ? _pickAgentName : _send),
-            child: Container(
-              width: 40, height: 40,
-              decoration: BoxDecoration(color: _agentName == null ? kCard2 : accent, shape: BoxShape.circle),
-              child: _sending
-                  ? const Center(child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
-                  : Icon(_agentName == null ? Icons.person_outline : Icons.send_rounded, size: 18, color: _agentName == null ? kMuted2 : Colors.white),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 160),
+                    child: SingleChildScrollView(
+                      child: TextField(
+                        controller: _ctrl,
+                        maxLines: null,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        style: GoogleFonts.inter(color: kText, fontSize: 14.5, height: 1.55),
+                        cursorColor: kAccent,
+                        cursorWidth: 1.5,
+                        decoration: InputDecoration(
+                          hintText: _agentName == null ? 'Choisir un nom pour commencer…' : 'Envoyer un message…',
+                          hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14.5),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: true,
+                          fillColor: Colors.transparent,
+                          contentPadding: EdgeInsets.zero,
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                    GestureDetector(
+                      onTap: _sending ? null : (_agentName == null ? _pickAgentName : _send),
+                      child: Container(
+                        width: 36, height: 36,
+                        decoration: BoxDecoration(
+                          color: _agentName == null ? kCard : accent,
+                          shape: BoxShape.circle,
+                        ),
+                        child: _sending
+                            ? const Center(child: SizedBox(width: 14, height: 14, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5)))
+                            : Icon(_agentName == null ? Icons.person_outline : Icons.send_rounded, size: 17, color: _agentName == null ? kMuted2 : Colors.white),
+                      ),
+                    ),
+                  ]),
+                ),
+              ],
             ),
           ),
-        ]),
+        ),
       ),
     ]);
   }

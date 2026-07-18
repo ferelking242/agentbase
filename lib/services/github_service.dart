@@ -364,6 +364,7 @@ class GitHubService {
 
   Future<void> pushPrompt(String roomId, AgentPrompt prompt) async {
     if (_pat.isEmpty) throw Exception('No PAT');
+    if (owner.isEmpty) throw Exception('Owner GitHub non configuré — va dans Paramètres');
     final r = await _client.put(
       Uri.parse('$_api/contents/rooms/$roomId/prompt-${prompt.id}.md'),
       headers: _h,
@@ -588,6 +589,7 @@ class GitHubService {
     Map<String, String> preUploadedUrls = const {},
   }) async {
     if (_pat.isEmpty) throw Exception('PAT non configuré — va dans Paramètres');
+    if (owner.isEmpty) throw Exception('Owner GitHub non configuré — va dans Paramètres');
 
     // urlMap  : nom original → URL raw GitHub (stockage permanent)
     // inlineMap: nom original → data URI base64 (affichage inline Claude/ChatGPT)

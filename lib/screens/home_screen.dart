@@ -512,7 +512,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // ── Gemini improve prompt ──────────────────────────────────────────────────
   Future<void> _showGeminiImprove() async {
-    if (!GeminiService().hasKeys) {
+    final gemini = GeminiService();
+    await gemini.ensureInitialized();
+    if (!gemini.hasKeys) {
       showAppSnack(context, 'Configure tes clés Gemini dans Paramètres', color: kYellow);
       return;
     }

@@ -47,6 +47,10 @@ class GeminiService {
 
   static Future<void> saveKeys(List<String> keys) async {
     await PrefsService.setString(_kKeys, jsonEncode(keys));
+    // Update in-memory state so hasKeys reflects the new list immediately
+    final instance = GeminiService();
+    instance._keys = List<String>.from(keys);
+    instance._initialized = true;
   }
 
   Future<Map<int, DateTime>> _loadExhaustedUntil() async {
@@ -215,6 +219,11 @@ class GeminiService {
   }
 
   bool get hasKeys => _keys.isNotEmpty;
+
+  /// Ensures the service is initialized. Safe to call multiple times.
+  Future<void> ensureInitialized() async {
+    if (!_initialized) await init();
+  }
 
   String get statusText {
     if (_keys.isEmpty) return 'Aucune clé configurée';
