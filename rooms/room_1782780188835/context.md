@@ -108,25 +108,6 @@ Keystore APK : alias `reel`, passwords `reelwatchtower`. Secrets CI requis : `KE
 
 ---
 
-## TODOs actifs
-
-### watchtower-real
-- [ ] `feed_page.dart` — tap-and-hold pause, double-tap like
-- [ ] `feed_provider.dart` — pagination infinie
-- [ ] Settings screen — config serveur + sélection source + choix UI
-- [ ] `lib/ui/tiktok/` dans watchtower — scaffold + git dep dans pubspec.yaml
-- [ ] `lib/ui/netflix/` dans watchtower — renommer l'UI actuelle
-
-### watchtower (serveur)
-- [ ] HuggingFace Dockerfile + RunPod (documentés, à tester)
-- [ ] CI merge-ui — workflow auto-PR depuis watchtower-real/main
-
-### watchtower-website
-- [ ] Pages Musique, Novels — à remplir
-- [ ] Page architecture.md — diagramme two-server + multi-UI
-
----
-
 ## Déploiement rapide — Docker
 
 ```bash
