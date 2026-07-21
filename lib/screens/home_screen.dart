@@ -17,6 +17,7 @@ import '../widgets/prompts_sheet.dart';
 import '../services/notification_service.dart';
 import 'fullscreen_composer.dart';
 import 'image_edit_screen.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'notifications_screen.dart';
 import 'openspace_screen.dart';
 import 'templates_screen.dart';
@@ -176,12 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (pos < 0) return;
     final before = _ctrl.text.substring(0, pos);
     final after  = _ctrl.text.substring(pos);
-    final match  = RegExp(r'@(\w*)$').firstMatch(before);
-    final mention = '@${f.name.replaceAll(' ', '_').replaceAll('.', '_')}';
-    final newBefore = match != null ? before.substring(0, match.start) + mention : before + mention;
-    _ctrl.value = TextEditingValue(text: newBefore + after, selection: TextSelection.collapsed(offset: newBefore.length));
-    setState(() => _mentionQuery = null);
-  }
+    final match  = RegExp(r'@(\w*)
 
   void _insertOpenSpaceMention(Map<String, dynamic> img) {
     final pos = _ctrl.selection.baseOffset;
@@ -211,6 +207,12 @@ class _HomeScreenState extends State<HomeScreen> {
           Navigator.pop(context);
           await _handleOpenSpaceImagePick(img);
         },
+        promptText: _ctrl.text,
+        promptName: _promptName,
+        selectedRoom: _selectedRoom,
+        rooms: _rooms,
+        onNameSaved: (name) => setState(() => _promptName = name),
+        onRoomSelected: (room) => setState(() => _selectedRoom = room),
       ),
     );
   }
@@ -874,15 +876,12 @@ class _HomeScreenState extends State<HomeScreen> {
     itemBuilder: (_, i) {
       if (i == _msgs.length) return const _TypingDots();
       final m = _msgs[i];
-      return m.isUser ? _UserBubble(msg: m, onImageTap: _showImageFullscreen) : _AgentBubble(msg: m);
+      return m.isUser ? _UserBubble(msg: m, onImageTap: _showImageFullscreen) : _AgentBubble(msg: m, github: widget.github);
     },
   );
 
   Widget _buildInput() {
     final hasContent = _ctrl.text.trim().isNotEmpty || _files.isNotEmpty;
-    final displayName = _promptName.isNotEmpty
-        ? (_promptName.length > 28 ? '${_promptName.substring(0, 25)}…' : _promptName)
-        : '';
     return SafeArea(
       top: false,
       child: Padding(
@@ -957,73 +956,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              // ── Nom + room (visible quand il y a du contenu) ───────────
-              if (hasContent)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-                  child: Row(children: [
-                    // Room chip
-                    GestureDetector(
-                      onTap: _showRoomPicker,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: _selectedRoom != null
-                              ? _selectedRoom!.accentColor.withOpacity(0.1)
-                              : kCard,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                            color: _selectedRoom != null
-                                ? _selectedRoom!.accentColor.withOpacity(0.4)
-                                : kBorder,
-                            width: 0.5,
-                          ),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(
-                            _selectedRoom != null ? _selectedRoom!.iconData : Icons.workspaces_outlined,
-                            size: 11,
-                            color: _selectedRoom != null ? _selectedRoom!.accentColor : kMuted2,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _selectedRoom?.name ?? 'Room',
-                            style: GoogleFonts.inter(
-                              color: _selectedRoom != null ? _selectedRoom!.accentColor : kMuted2,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ]),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    // Name pill
-                    if (displayName.isNotEmpty)
-                      Flexible(
-                        child: GestureDetector(
-                          onTap: _showNameDialog,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: kCard,
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: kBorder, width: 0.5),
-                            ),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              const Icon(Icons.edit_note_rounded, size: 11, color: kMuted2),
-                              const SizedBox(width: 4),
-                              Flexible(child: Text(displayName,
-                                style: GoogleFonts.inter(color: kMuted2, fontSize: 11),
-                                maxLines: 1, overflow: TextOverflow.ellipsis)),
-                            ]),
-                          ),
-                        ),
-                      ),
-                  ]),
-                ),
-
-              // ── Barre d'actions : [+] [room] [spacer] [✨] [📝] [↑] ──
+              // ── Barre d'actions : [+] [spacer] [⛶] [✨] [↑] ──
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
                 child: Row(
@@ -1063,15 +996,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ? const SizedBox(width: 20, height: 20,
                                 child: CircularProgressIndicator(color: Color(0xFF4285F4), strokeWidth: 1.5))
                             : const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF4285F4)),
-                      ),
-                    ),
-
-                    // 📝 Edit name
-                    GestureDetector(
-                      onTap: _showNameDialog,
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: const Icon(Icons.edit_note_rounded, size: 19, color: kMuted),
                       ),
                     ),
 
@@ -1317,9 +1241,12 @@ class _UserBubble extends StatelessWidget {
   AttachedFile? _findFile(String mention) {
     final needle = mention.toLowerCase();
     for (final f in msg.files) {
-      final normalized = f.name.replaceAll(' ', '_').replaceAll('.', '_').toLowerCase();
-      if (normalized == needle || f.name.toLowerCase() == needle) return f;
-      if (normalized.startsWith(needle) || needle.startsWith(normalized.split('_').first)) return f;
+      // Match by base name (without extension), spaces→_
+      final dot = f.name.lastIndexOf('.');
+      final slug = (dot > 0 ? f.name.substring(0, dot) : f.name)
+          .replaceAll(' ', '_').toLowerCase();
+      if (slug == needle || f.name.toLowerCase() == needle) return f;
+      if (slug.startsWith(needle)) return f;
     }
     return null;
   }
@@ -1440,51 +1367,123 @@ class _UserBubble extends StatelessWidget {
 }
 
 // ── _AgentBubble ──────────────────────────────────────────────────────────────
-class _AgentBubble extends StatelessWidget {
+class _AgentBubble extends StatefulWidget {
   final _Msg msg;
-  const _AgentBubble({required this.msg});
+  final GitHubService github;
+  const _AgentBubble({required this.msg, required this.github});
+  @override State<_AgentBubble> createState() => _AgentBubbleState();
+}
+
+class _AgentBubbleState extends State<_AgentBubble> {
+  bool _copiedMd = false;
+  bool _copiedLink = false;
+  bool _loadingMd = false;
+
+  Future<void> _copyMd() async {
+    final p = widget.msg.prompt!;
+    setState(() => _loadingMd = true);
+    try {
+      final content = await widget.github.fetchPromptContent(p.id);
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: content ?? p.link));
+      setState(() { _loadingMd = false; _copiedMd = true; });
+      if (context.mounted) showAppSnack(context, 'Contenu copié !');
+      Future.delayed(const Duration(seconds: 2), () { if (mounted) setState(() => _copiedMd = false); });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMd = false);
+    }
+  }
+
+  Future<void> _copyLink() async {
+    final p = widget.msg.prompt!;
+    await Clipboard.setData(ClipboardData(text: p.link));
+    if (!mounted) return;
+    setState(() => _copiedLink = true);
+    if (context.mounted) showAppSnack(context, 'Lien copié !');
+    Future.delayed(const Duration(seconds: 2), () { if (mounted) setState(() => _copiedLink = false); });
+  }
+
+  Future<void> _openLink() async {
+    final p = widget.msg.prompt!;
+    final uri = Uri.tryParse(p.link);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final isError = msg.kind == _MsgKind.agentError;
-    if (msg.kind == _MsgKind.promptSaved) {
-      final p = msg.prompt!;
-      final num = p.number > 0 ? ' #${p.number}' : '';
+    final m = widget.msg;
+    final isError = m.kind == _MsgKind.agentError;
+    if (m.kind == _MsgKind.promptSaved) {
+      final p = m.prompt!;
+      final numLabel = p.number > 0 ? 'Prompt #${p.number}' : 'Prompt';
       return Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: AppCard(
           padding: const EdgeInsets.all(12),
           color: kGreenSub.withOpacity(0.5),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Top row : ✓ Sauvegardé | Prompt #N badge
             Row(children: [
               const Icon(Icons.check_circle_outline, size: 15, color: kGreen),
               const SizedBox(width: 6),
-              if (p.number > 0) ...[AppBadge('Prompt$num', bg: kGreenSub, fg: kGreen), const SizedBox(width: 8)],
-              Expanded(child: Text(p.name, style: GoogleFonts.inter(color: kText, fontSize: 13, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Text('Sauvegardé', style: GoogleFonts.inter(color: kGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              AppBadge(numLabel, bg: kGreenSub, fg: kGreen),
             ]),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
+            // Redirect button
             GestureDetector(
-              onTap: () async { await Clipboard.setData(ClipboardData(text: p.link)); showAppSnack(context, 'Lien copié !'); },
-              child: Text(p.link, style: GoogleFonts.robotoMono(color: kBlue, fontSize: 11), maxLines: 2, overflow: TextOverflow.ellipsis),
+              onTap: _openLink,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: kCard2,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: kBorder, width: 0.5),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.open_in_new, size: 13, color: kBlue),
+                  const SizedBox(width: 6),
+                  Text('Voir le prompt', style: GoogleFonts.inter(color: kBlue, fontSize: 12.5)),
+                ]),
+              ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 8),
+            // Bottom row : [Copier MD] [Copier lien] | nom
             Row(children: [
               GestureDetector(
-                onTap: () async {
-                  final md = '[${p.name}](${p.link})';
-                  await Clipboard.setData(ClipboardData(text: md));
-                  if (context.mounted) showAppSnack(context, 'Lien Markdown copié !');
-                },
+                onTap: _loadingMd ? null : _copyMd,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(color: kGreenSub, borderRadius: BorderRadius.circular(6), border: Border.all(color: kGreen.withOpacity(0.2), width: 0.5)),
                   child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    const Icon(Icons.copy, size: 11, color: kGreen),
+                    _loadingMd
+                        ? const SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: kGreen))
+                        : Icon(_copiedMd ? Icons.check : Icons.content_copy, size: 11, color: kGreen),
                     const SizedBox(width: 4),
-                    Text('Copier MD', style: GoogleFonts.inter(color: kGreen, fontSize: 11, fontWeight: FontWeight.w600)),
+                    Text(_copiedMd ? 'Copié !' : 'Copier MD', style: GoogleFonts.inter(color: kGreen, fontSize: 11, fontWeight: FontWeight.w600)),
                   ]),
                 ),
               ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: _copyLink,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(6), border: Border.all(color: kBorder, width: 0.5)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(_copiedLink ? Icons.check : Icons.link, size: 11, color: kMuted),
+                    const SizedBox(width: 4),
+                    Text(_copiedLink ? 'Copié !' : 'Copier lien', style: GoogleFonts.inter(color: kMuted, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+              const Spacer(),
+              if (p.name.isNotEmpty)
+                Flexible(child: Text(p.name, style: GoogleFonts.inter(color: kMuted2, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)),
             ]),
           ]),
         ),
@@ -1503,7 +1502,7 @@ class _AgentBubble extends StatelessWidget {
               borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(14), bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
               border: Border.all(color: isError ? kRed.withOpacity(0.3) : kBorder, width: 0.5),
             ),
-            child: Text(msg.text, style: GoogleFonts.inter(color: isError ? kRed : kText2, fontSize: 13.5, height: 1.5)),
+            child: Text(m.text, style: GoogleFonts.inter(color: isError ? kRed : kText2, fontSize: 13.5, height: 1.5)),
           ),
         ),
       ),
@@ -1621,6 +1620,13 @@ class _AttachSheet extends StatefulWidget {
   final VoidCallback onGallery;
   final VoidCallback onCamera;
   final Future<void> Function(OpenspaceImage) onOpenSpacePick;
+  // Prompt config (tab 2)
+  final String promptText;
+  final String promptName;
+  final Room? selectedRoom;
+  final List<Room> rooms;
+  final void Function(String) onNameSaved;
+  final void Function(Room?) onRoomSelected;
 
   const _AttachSheet({
     required this.github,
@@ -1628,6 +1634,12 @@ class _AttachSheet extends StatefulWidget {
     required this.onGallery,
     required this.onCamera,
     required this.onOpenSpacePick,
+    required this.promptText,
+    required this.promptName,
+    required this.selectedRoom,
+    required this.rooms,
+    required this.onNameSaved,
+    required this.onRoomSelected,
   });
 
   @override
@@ -1640,10 +1652,21 @@ class _AttachSheetState extends State<_AttachSheet> {
   bool _osLoading = false;
   String _osSearch = '';
   final _osSearchCtrl = TextEditingController();
+  int _activeTab = 0; // 0 = Fichiers, 1 = Prompt
+  late final TextEditingController _nameCtrl;
+  Room? _selectedRoom;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.promptName);
+    _selectedRoom = widget.selectedRoom;
+  }
 
   @override
   void dispose() {
     _osSearchCtrl.dispose();
+    _nameCtrl.dispose();
     super.dispose();
   }
 
@@ -1680,54 +1703,117 @@ class _AttachSheetState extends State<_AttachSheet> {
         ),
         child: SafeArea(
           top: false,
-          child: _showOpenSpace ? _buildOpenSpace() : _buildMenu(),
+          child: _showOpenSpace ? _buildOpenSpace() : _buildContent(),
         ),
       ),
     );
   }
 
-  Widget _buildMenu() => Column(mainAxisSize: MainAxisSize.min, children: [
+  Widget _buildContent() => Column(mainAxisSize: MainAxisSize.min, children: [
     const AppDragHandle(),
+    // Tab selector row
     Padding(
-      padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-      child: Column(children: [
-        _AttachOption(
-          icon: Icons.photo_camera_outlined,
-          title: 'Caméra',
-          subtitle: 'Prendre une photo',
-          color: kGreen,
-          onTap: widget.onCamera,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(children: [
+        _SheetTab(
+          label: 'Fichiers', icon: Icons.attach_file, selected: _activeTab == 0,
+          onTap: () => setState(() { _activeTab = 0; _showOpenSpace = false; }),
         ),
-        const SizedBox(height: 2),
-        _AttachOption(
-          icon: Icons.photo_library_outlined,
-          title: 'Galerie',
-          subtitle: 'Photos & vidéos',
-          color: kAccentMid,
-          onTap: widget.onGallery,
-        ),
-        const SizedBox(height: 2),
-        _AttachOption(
-          icon: Icons.folder_outlined,
-          title: 'Fichiers',
-          subtitle: 'Tout type de fichier',
-          color: kYellow,
-          onTap: widget.onFiles,
-        ),
-        const SizedBox(height: 2),
-        _AttachOption(
-          icon: Icons.cloud_outlined,
-          title: 'OpenSpace',
-          subtitle: 'Galerie partagée',
-          color: const Color(0xFF8B5CF6),
-          onTap: _openOpenSpace,
+        const SizedBox(width: 8),
+        _SheetTab(
+          label: 'Prompt', icon: Icons.edit_note_rounded, selected: _activeTab == 1,
+          onTap: () => setState(() => _activeTab = 1),
         ),
       ]),
     ),
+    if (_activeTab == 0) _buildAttachMenu() else _buildPromptConfig(),
   ]);
 
+  Widget _buildAttachMenu() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      _AttachOption(icon: Icons.photo_camera_outlined, title: 'Caméra', subtitle: 'Prendre une photo', color: kGreen, onTap: widget.onCamera),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.photo_library_outlined, title: 'Galerie', subtitle: 'Photos & vidéos', color: kAccentMid, onTap: widget.onGallery),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.folder_outlined, title: 'Fichiers', subtitle: 'Tout type de fichier', color: kYellow, onTap: widget.onFiles),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.cloud_outlined, title: 'OpenSpace', subtitle: 'Galerie partagée', color: const Color(0xFF8B5CF6), onTap: _openOpenSpace),
+    ]),
+  );
+
+  Widget _buildPromptConfig() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Text('Nom du prompt', style: GoogleFonts.inter(color: kMuted2, fontSize: 12, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      Container(
+        decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _nameCtrl,
+              style: GoogleFonts.inter(color: kText, fontSize: 13.5),
+              cursorColor: kAccent,
+              decoration: InputDecoration(
+                hintText: 'Auto-généré si vide',
+                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 13.5),
+                border: InputBorder.none,
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                isDense: true,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              final auto = _smartTitle(widget.promptText);
+              if (auto.isNotEmpty) setState(() => _nameCtrl.text = auto);
+            },
+            child: const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.refresh, size: 16, color: kMuted2)),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      Text('Assigner à une room', style: GoogleFonts.inter(color: kMuted2, fontSize: 12, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      SizedBox(
+        height: 40,
+        child: ListView(scrollDirection: Axis.horizontal, children: [
+          _RoomChipLocal(
+            label: 'Aucune', icon: Icons.remove_circle_outline, color: kMuted2,
+            selected: _selectedRoom == null,
+            onTap: () { setState(() => _selectedRoom = null); widget.onRoomSelected(null); },
+          ),
+          ...widget.rooms.map((r) => _RoomChipLocal(
+            label: r.name, icon: r.iconData, color: r.accentColor,
+            selected: _selectedRoom?.id == r.id,
+            onTap: () { setState(() => _selectedRoom = r); widget.onRoomSelected(r); },
+          )),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      SizedBox(
+        width: double.infinity,
+        child: GestureDetector(
+          onTap: () {
+            widget.onNameSaved(_nameCtrl.text.trim());
+            Navigator.pop(context);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(color: kAccent, borderRadius: BorderRadius.circular(10)),
+            alignment: Alignment.center,
+            child: Text('Confirmer', style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ),
+    ]),
+  );
+
   Widget _buildOpenSpace() => Column(mainAxisSize: MainAxisSize.min, children: [
-    // Header with back button and search
     Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
       child: Row(children: [
@@ -1767,7 +1853,6 @@ class _AttachSheetState extends State<_AttachSheet> {
       ]),
     ),
     const AppDivider(),
-    // Content
     ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 320),
       child: _osLoading
@@ -1829,6 +1914,2039 @@ class _AttachSheetState extends State<_AttachSheet> {
     ),
     const SizedBox(height: 8),
   ]);
+}
+
+// ── Tab button for the attach sheet ──────────────────────────────────────────
+class _SheetTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SheetTab({required this.label, required this.icon, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? kAccent.withOpacity(0.12) : kCard2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: selected ? kAccent.withOpacity(0.4) : kBorder, width: 0.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: selected ? kAccentMid : kMuted2),
+        const SizedBox(width: 6),
+        Text(label, style: GoogleFonts.inter(
+          color: selected ? kAccentMid : kMuted2,
+          fontSize: 13,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+        )),
+      ]),
+    ),
+  );
+}
+
+// ── Small room chip inside the prompt tab ─────────────────────────────────────
+class _RoomChipLocal extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+  const _RoomChipLocal({required this.label, required this.icon, required this.color, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? color.withOpacity(0.12) : kCard2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: selected ? color.withOpacity(0.5) : kBorder, width: 0.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: selected ? color : kMuted2),
+        const SizedBox(width: 5),
+        Text(label, style: GoogleFonts.inter(
+          color: selected ? color : kMuted2,
+          fontSize: 12.5,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+        )),
+      ]),
+    ),
+  );
+}
+
+class _AttachOption extends StatelessWidget {
+  final IconData icon;
+  final String title, subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AttachOption({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    behavior: HitTestBehavior.opaque,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(children: [
+        Container(
+          width: 42, height: 42,
+          decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(11)),
+          child: Icon(icon, size: 20, color: color),
+        ),
+        const SizedBox(width: 14),
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(title, style: GoogleFonts.inter(color: kText, fontSize: 14.5, fontWeight: FontWeight.w500)),
+          Text(subtitle, style: GoogleFonts.inter(color: kMuted2, fontSize: 12)),
+        ]),
+        const Spacer(),
+        const Icon(Icons.chevron_right_rounded, size: 18, color: kMuted2),
+      ]),
+    ),
+  );
+}
+
+// ── _GeminiImproveSheet ───────────────────────────────────────────────────────
+class _GeminiImproveSheet extends StatefulWidget {
+  final String original;
+  final String improved;
+  final String suggestedName;
+  final void Function(String text, String name) onAccept;
+
+  const _GeminiImproveSheet({
+    required this.original,
+    required this.improved,
+    required this.suggestedName,
+    required this.onAccept,
+  });
+
+  @override
+  State<_GeminiImproveSheet> createState() => _GeminiImproveSheetState();
+}
+
+class _GeminiImproveSheetState extends State<_GeminiImproveSheet> {
+  bool _showOriginal = false;
+  late final TextEditingController _nameCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.suggestedName);
+  }
+
+  @override
+  void dispose() { _nameCtrl.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+    child: Container(
+      decoration: const BoxDecoration(
+        color: kCard,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        border: Border(top: BorderSide(color: kBorder, width: 0.5)),
+      ),
+      child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const AppDragHandle(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 0),
+          child: Row(children: [
+            Container(
+              width: 28, height: 28,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(colors: [Color(0xFF4285F4), Color(0xFF9C27B0)]),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.auto_awesome, size: 14, color: Colors.white),
+            ),
+            const SizedBox(width: 10),
+            Text('Prompt amélioré par Gemini', style: GoogleFonts.inter(color: kText, fontSize: 14, fontWeight: FontWeight.w600)),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => setState(() => _showOriginal = !_showOriginal),
+              child: Text(_showOriginal ? 'Voir amélioré' : 'Voir original',
+                style: GoogleFonts.inter(color: kAccentMid, fontSize: 12)),
+            ),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          margin: const EdgeInsets.symmetric(horizontal: 20),
+          padding: const EdgeInsets.all(12),
+          constraints: const BoxConstraints(maxHeight: 160),
+          decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+          child: SingleChildScrollView(
+            child: Text(
+              _showOriginal ? widget.original : widget.improved,
+              style: GoogleFonts.inter(color: kText2, fontSize: 13.5, height: 1.6),
+            ),
+          ),
+        ),
+        if (widget.suggestedName.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('Nom suggéré', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              AppInput(
+                controller: _nameCtrl,
+                hint: 'Nom du prompt',
+                suffix: GestureDetector(
+                  onTap: () => _nameCtrl.text = widget.suggestedName,
+                  child: const Padding(padding: EdgeInsets.all(12), child: Icon(Icons.refresh, size: 16, color: kMuted2)),
+                ),
+              ),
+            ]),
+          ),
+        ],
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: Row(children: [
+            Expanded(child: AppButton(
+              label: 'Refuser', variant: AppButtonVariant.outline, fullWidth: true,
+              onTap: () => Navigator.pop(context),
+              padding: const EdgeInsets.symmetric(vertical: 13),
+            )),
+            const SizedBox(width: 10),
+            Expanded(flex: 2, child: AppButton(
+              label: 'Accepter',
+              fullWidth: true,
+              onTap: () {
+                widget.onAccept(widget.improved, _nameCtrl.text.trim());
+                Navigator.pop(context);
+              },
+              padding: const EdgeInsets.symmetric(vertical: 13),
+            )),
+          ]),
+        ),
+        const SizedBox(height: 4),
+      ])),
+    ),
+  );
+}
+).firstMatch(before);
+    // Use base name without extension (spaces→_) to avoid dots in @mention
+    final dot = f.name.lastIndexOf('.');
+    final baseName = dot > 0 ? f.name.substring(0, dot) : f.name;
+    final mention = '@${baseName.replaceAll(' ', '_')}';
+    final newBefore = match != null ? before.substring(0, match.start) + mention : before + mention;
+    _ctrl.value = TextEditingValue(text: newBefore + after, selection: TextSelection.collapsed(offset: newBefore.length));
+    setState(() => _mentionQuery = null);
+  }
+
+  void _insertOpenSpaceMention(Map<String, dynamic> img) {
+    final pos = _ctrl.selection.baseOffset;
+    if (pos < 0) return;
+    final before = _ctrl.text.substring(0, pos);
+    final after  = _ctrl.text.substring(pos);
+    final match  = RegExp(r'@@(\w*)$').firstMatch(before);
+    final mention = img['mention'] as String? ?? '@image';
+    final newBefore = match != null ? before.substring(0, match.start) + mention : before + mention;
+    _ctrl.value = TextEditingValue(text: newBefore + after, selection: TextSelection.collapsed(offset: newBefore.length));
+    setState(() { _openSpaceQuery = null; });
+  }
+
+  void _showAttachMenu() => _showAttachSheet();
+
+  void _showAttachSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _AttachSheet(
+        github: widget.github,
+        onFiles: () { Navigator.pop(context); _pickFiles(); },
+        onGallery: () { Navigator.pop(context); _pickFromGallery(); },
+        onCamera: () { Navigator.pop(context); _pickFromCamera(); },
+        onOpenSpacePick: (img) async {
+          Navigator.pop(context);
+          await _handleOpenSpaceImagePick(img);
+        },
+        promptText: _ctrl.text,
+        promptName: _promptName,
+        selectedRoom: _selectedRoom,
+        rooms: _rooms,
+        onNameSaved: (name) => setState(() => _promptName = name),
+        onRoomSelected: (room) => setState(() => _selectedRoom = room),
+      ),
+    );
+  }
+
+  Future<void> _handleOpenSpaceImagePick(OpenspaceImage img) async {
+    try {
+      final resp = await widget.github.downloadBytes(img.rawUrl);
+      if (!mounted) return;
+      final isImg = !img.isVideo;
+      final af = AttachedFile(name: img.name, bytes: resp, isImage: isImg);
+      setState(() { _files.insert(0, af); _startPreUpload(af); });
+    } catch (e) {
+      if (mounted) showAppSnack(context, 'Erreur téléchargement: $e', isError: true);
+    }
+  }
+
+  Future<void> _pickFromCamera() async {
+    try {
+      final img = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 90);
+      if (img == null || !mounted) return;
+      final bytes = await img.readAsBytes();
+      final fromName = img.name;
+      final fromPath = img.path.split('/').last.split('\\').last;
+      String name;
+      if (!_isTempName(fromName)) {
+        name = fromName;
+      } else if (!_isTempName(fromPath)) {
+        name = fromPath;
+      } else {
+        name = _stampName(0);
+      }
+      final af = AttachedFile(name: name, bytes: bytes, isImage: true);
+      if (mounted) setState(() { _files.insert(0, af); _startPreUpload(af); });
+    } catch (_) {}
+  }
+
+  /// Start pre-uploading [file] to GitHub in the background immediately.
+  void _startPreUpload(AttachedFile file) {
+    _preUploads[file.name] = widget.github.preUploadFile(_stagingId, file);
+  }
+
+  Future<void> _pickFiles() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(allowMultiple: true, withData: true, type: FileType.any);
+      if (res == null) return;
+      setState(() {
+        for (final f in res.files) {
+          if (f.bytes == null) continue;
+          final n = f.name.toLowerCase();
+          final af = AttachedFile(
+            name: f.name, bytes: f.bytes!,
+            isImage: n.endsWith('.png') || n.endsWith('.jpg') || n.endsWith('.jpeg') || n.endsWith('.gif') || n.endsWith('.webp'),
+          );
+          _files.insert(0, af);
+          _startPreUpload(af);
+        }
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _pickFromGallery() async {
+    try {
+      final imgs = await ImagePicker().pickMultiImage(imageQuality: 90);
+      if (imgs.isEmpty) return;
+      for (int i = 0; i < imgs.length; i++) {
+        final bytes = await imgs[i].readAsBytes();
+        final fromName = imgs[i].name;
+        final fromPath = imgs[i].path.split('/').last.split('\\').last;
+        String name;
+        if (!_isTempName(fromName)) {
+          name = fromName;
+        } else if (!_isTempName(fromPath)) {
+          name = fromPath;
+        } else {
+          name = _stampName(i);
+        }
+        final af = AttachedFile(name: name, bytes: bytes, isImage: true);
+        if (mounted) setState(() {
+          _files.insert(0, af);
+          _startPreUpload(af);
+        });
+      }
+    } catch (_) {}
+  }
+
+  bool _isTempName(String n) {
+    if (n.isEmpty) return true;
+    final l = n.toLowerCase();
+    // UUID-style names
+    if (RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}').hasMatch(l)) return true;
+    // Known picker cache patterns
+    if (RegExp(r'^image_picker_[0-9a-f]').hasMatch(l)) return true;
+    if (RegExp(r'^scaled_[0-9a-f]').hasMatch(l)) return true;
+    if (RegExp(r'^img_[0-9]{10,}\.').hasMatch(l)) return true;
+    // Purely numeric names (timestamp-only)
+    if (RegExp(r'^\d{10,}\.(jpg|jpeg|png|webp)$').hasMatch(l)) return true;
+    return false;
+  }
+
+  String _stampName(int idx) {
+    final t = DateTime.now();
+    final s = idx > 0 ? '_$idx' : '';
+    return 'photo_${t.year}${_p(t.month)}${_p(t.day)}_${_p(t.hour)}${_p(t.minute)}${_p(t.second)}$s.jpg';
+  }
+
+  String _p(int n) => n.toString().padLeft(2, '0');
+
+  Future<void> _editImage(int i) async {
+    final f = _files[i];
+    if (!f.isImage) return;
+    final result = await Navigator.push<Uint8List?>(
+      context,
+      MaterialPageRoute(builder: (_) => ImageEditScreen(bytes: f.bytes, name: f.name)),
+    );
+    if (result != null && mounted) {
+      setState(() => _files[i] = AttachedFile(name: f.name, bytes: result, isImage: true));
+    }
+  }
+
+  Future<void> _renameFile(int i) async {
+    final f   = _files[i];
+    final dot = f.name.lastIndexOf('.');
+    final nameOnly = dot > 0 ? f.name.substring(0, dot) : f.name;
+    final ext      = dot > 0 ? f.name.substring(dot) : '';
+    final ctrl = TextEditingController(text: nameOnly);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: kBorder, width: 0.5)),
+        title: Text('Renommer', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600)),
+        content: AppInput(controller: ctrl, autofocus: true, suffixText: ext, hint: 'Nom du fichier', onSubmitted: (v) => Navigator.pop(_, v.trim())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(_), child: Text('Annuler', style: GoogleFonts.inter(color: kMuted))),
+          AppButton(label: 'OK', onTap: () => Navigator.pop(_, ctrl.text.trim()), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (newName != null && newName.isNotEmpty && mounted) {
+      setState(() => _files[i] = AttachedFile(name: newName + ext, bytes: f.bytes, isImage: f.isImage));
+    }
+  }
+
+  // ── Preview ────────────────────────────────────────────────────────────────
+  void _showPreview() {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) { showAppSnack(context, 'Écris quelque chose d\'abord'); return; }
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.6, maxChildSize: 0.92, minChildSize: 0.3,
+        builder: (ctx, scrollCtrl) => Container(
+          decoration: const BoxDecoration(
+            color: kCard,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+            border: Border(top: BorderSide(color: kBorder, width: 0.5)),
+          ),
+          child: Column(children: [
+            const AppDragHandle(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: Row(children: [
+                Text('Prévisualisation', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w700)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(6)),
+                  child: Text('${text.length} chars', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
+                ),
+              ]),
+            ),
+            const AppDivider(),
+            Expanded(child: ListView(
+              controller: scrollCtrl,
+              padding: const EdgeInsets.all(20),
+              children: [
+                SelectableText(
+                  text,
+                  style: GoogleFonts.inter(color: kText2, fontSize: 14, height: 1.7),
+                ),
+              ],
+            )),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  // ── Templates ──────────────────────────────────────────────────────────────
+  Future<void> _showTemplates() async {
+    final content = await Navigator.push<String?>(
+      context,
+      MaterialPageRoute(builder: (_) => const TemplatesScreen(pickMode: true)),
+    );
+    if (content == null || !mounted) return;
+    final pos = _ctrl.selection.isValid ? _ctrl.selection.baseOffset : _ctrl.text.length;
+    final before = _ctrl.text.substring(0, pos);
+    final after = _ctrl.text.substring(pos);
+    final separator = before.trim().isEmpty ? '' : '\n\n';
+    final newText = before + separator + content;
+    _ctrl.value = TextEditingValue(
+      text: newText + after,
+      selection: TextSelection.collapsed(offset: newText.length),
+    );
+    setState(() {});
+    _focus.requestFocus();
+  }
+
+  Future<void> _paste() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    if (data?.text == null || data!.text!.isEmpty) return;
+    final pos    = _ctrl.selection.isValid ? _ctrl.selection.baseOffset : _ctrl.text.length;
+    final before = _ctrl.text.substring(0, pos);
+    final after  = _ctrl.text.substring(pos);
+    _ctrl.value = TextEditingValue(
+      text: before + data.text! + after,
+      selection: TextSelection.collapsed(offset: pos + data.text!.length),
+    );
+    setState(() {});
+  }
+
+  Future<void> _openFullscreen() async {
+    // On utilise Object? pour distinguer deux cas de retour :
+    //   SavedPrompt  → prompt envoyé depuis le full screen
+    //   Map          → utilisateur a fermé (X) → on restaure le texte et les fichiers
+    final result = await Navigator.push<Object?>(
+      context,
+      MaterialPageRoute(builder: (_) => FullscreenComposerScreen(
+        initialText: _ctrl.text,
+        initialFiles: List.from(_files),
+        github: widget.github,
+        preloadedRooms: _rooms,
+      )),
+    );
+    if (result is SavedPrompt) {
+      // Envoi réussi — on vide le composer principal
+      _ctrl.clear();
+      setState(() => _files = []);
+      widget.onPromptSaved?.call(result);
+    } else if (result is Map) {
+      // Fermeture sans envoi — on restitue le texte + fichiers tapés en full screen
+      final text  = result['text']  as String?           ?? '';
+      final files = result['files'] as List<AttachedFile>? ?? [];
+      _ctrl.text = text;
+      setState(() => _files = List.from(files));
+    }
+    // null = swipe back natif sans changement → on ne touche à rien
+  }
+
+  Future<void> _send() async {
+    if (_ctrl.text.trim().isEmpty && _files.isEmpty) return;
+    final name = _promptName.isNotEmpty ? _promptName : _smartTitle(_ctrl.text.trim());
+    final text        = _ctrl.text;
+    final filesCopy   = List<AttachedFile>.from(_files);
+    final preUploads  = Map<String, Future<String?>>.from(_preUploads);
+    setState(() {
+      _msgs.add(_Msg.user(text, filesCopy, _selectedRoom));
+      _ctrl.clear();
+      _files = [];
+      _preUploads.clear();
+      _stagingId = _newStagingId();
+      _promptName = '';
+      _sending = true;
+    });
+    _scrollBottom();
+
+    try {
+      final resolvedUrls = <String, String>{};
+      for (final entry in preUploads.entries) {
+        try {
+          final url = await entry.value.timeout(const Duration(seconds: 1));
+          if (url != null) resolvedUrls[entry.key] = url;
+        } catch (_) {}
+      }
+
+      final id = generatePromptId();
+      String? roomContext;
+      if (_selectedRoom != null) roomContext = await widget.github.fetchContext(_selectedRoom!.id);
+      final link   = await widget.github.pushDirectPrompt(id, text, filesCopy,
+        room: _selectedRoom, roomContext: roomContext, preUploadedUrls: resolvedUrls);
+      final prompt = SavedPrompt(id: id, name: name, link: link, created: DateTime.now());
+      final saved  = await PrefsService.addPrompt(prompt);
+      if (!mounted) return;
+      setState(() { _msgs.add(_Msg.promptSaved(saved)); _sending = false; });
+      widget.onPromptSaved?.call(saved);
+      NotificationService.notifyPromptSaved(promptName: name, link: link);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _msgs.add(_Msg.agentError('Configure ton token dans Paramètres. (${e.toString().replaceAll("Exception: ", "")})'));
+        _sending = false;
+      });
+    }
+    _scrollBottom();
+  }
+
+  // ── Gemini improve prompt ──────────────────────────────────────────────────
+  Future<void> _showGeminiImprove() async {
+    final gemini = GeminiService();
+    await gemini.ensureInitialized();
+    if (!gemini.hasKeys) {
+      showAppSnack(context, 'Configure tes clés Gemini dans Paramètres', color: kYellow);
+      return;
+    }
+    final text = _ctrl.text.trim();
+    if (text.isEmpty) { showAppSnack(context, 'Écris quelque chose d\'abord'); return; }
+
+    setState(() => _geminiImproving = true);
+    String? roomCtx;
+    if (_selectedRoom != null) {
+      try { roomCtx = await widget.github.fetchContext(_selectedRoom!.id); } catch (_) {}
+    }
+    final results = await Future.wait([
+      GeminiService().improvePrompt(text, roomContext: roomCtx, roomName: _selectedRoom?.name),
+      GeminiService().suggestName(text, roomContext: roomCtx, roomName: _selectedRoom?.name),
+    ]);
+    if (!mounted) return;
+    setState(() => _geminiImproving = false);
+
+    if (!results[0].success) {
+      if (mounted) showAppSnack(context, results[0].error ?? 'Erreur Gemini', isError: true);
+      return;
+    }
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _GeminiImproveSheet(
+        original: text,
+        improved: results[0].text,
+        suggestedName: results[1].success ? results[1].text : '',
+        onAccept: (newText, name) {
+          _ctrl.value = TextEditingValue(text: newText, selection: TextSelection.collapsed(offset: newText.length));
+          if (name.isNotEmpty) setState(() => _promptName = name);
+          setState(() {});
+        },
+      ),
+    );
+  }
+
+  // ── Edit prompt name ───────────────────────────────────────────────────────
+  Future<void> _showNameDialog() async {
+    final autoName = _promptName.isNotEmpty ? _promptName : _smartTitle(_ctrl.text.trim());
+    final ctrl = TextEditingController(text: autoName);
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: kCard,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: kBorder, width: 0.5)),
+        title: Text('Nom du prompt', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w600)),
+        content: AppInput(
+          controller: ctrl, autofocus: true,
+          hint: 'Ex: Analyse de performance UI',
+          onSubmitted: (v) => Navigator.pop(_, v.trim()),
+          suffix: GestureDetector(onTap: () => ctrl.clear(),
+            child: const Padding(padding: EdgeInsets.all(12), child: Icon(Icons.close, size: 16, color: kMuted2))),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(_), child: Text('Annuler', style: GoogleFonts.inter(color: kMuted))),
+          AppButton(label: 'OK', onTap: () => Navigator.pop(_, ctrl.text.trim()), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8)),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (newName != null && newName.isNotEmpty && mounted) setState(() => _promptName = newName);
+  }
+
+  // ── Room picker ────────────────────────────────────────────────────────────
+  Future<void> _showRoomPicker() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: const BoxDecoration(color: kCard, borderRadius: BorderRadius.vertical(top: Radius.circular(16)), border: Border(top: BorderSide(color: kBorder, width: 0.5))),
+        child: SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const AppDragHandle(),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+            child: Text('Assigner à une room', style: GoogleFonts.inter(color: kText, fontSize: 15, fontWeight: FontWeight.w700)),
+          ),
+          const AppDivider(),
+          SizedBox(
+            height: 60,
+            child: _rooms.isEmpty
+                ? const Center(child: CircularProgressIndicator(color: kAccent, strokeWidth: 2))
+                : ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    children: [
+                      RoomChip(label: 'Aucune', selected: _selectedRoom == null,
+                        onTap: () { setState(() => _selectedRoom = null); Navigator.pop(context); }),
+                      ..._rooms.map((r) => RoomChip(
+                        label: r.name, icon: r.iconData, color: r.accentColor,
+                        selected: _selectedRoom?.id == r.id,
+                        onTap: () { setState(() => _selectedRoom = r); Navigator.pop(context); },
+                      )),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 8),
+        ])),
+      ),
+    );
+  }
+
+  void _scrollBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) _scroll.animateTo(_scroll.position.maxScrollExtent, duration: const Duration(milliseconds: 280), curve: Curves.easeOut);
+    });
+  }
+
+  void _showPromptsSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => PromptsSheet(
+        prompts: widget.prompts,
+        github: widget.github,
+        onSync: () { Navigator.pop(context); widget.onSyncRequest(); },
+        onDelete: (id) { widget.onDeletePrompt(id); },
+      ),
+    );
+  }
+
+  void _showImageFullscreen(Uint8List bytes, String name) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.95),
+      builder: (_) => Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(child: Column(children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+            child: Row(children: [
+              const Spacer(),
+              IconButton(icon: const Icon(Icons.close, color: Colors.white60), onPressed: () => Navigator.pop(_)),
+            ]),
+          ),
+          Expanded(child: InteractiveViewer(minScale: 0.5, maxScale: 5, child: Center(child: Image.memory(bytes)))),
+          Padding(padding: const EdgeInsets.all(12), child: Text(name, style: GoogleFonts.inter(color: Colors.white38, fontSize: 12), textAlign: TextAlign.center)),
+        ])),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmpty  = _msgs.isEmpty && !_sending;
+    final mentions = _mentionSuggestions;
+    final osMentions = _openSpaceSuggestions;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      _buildHeader(),
+      Expanded(
+        child: Stack(
+          children: [
+            Positioned.fill(child: isEmpty ? _buildHome() : _buildMsgs()),
+            // OpenSpace @@ overlay (priority)
+            if (_openSpaceQuery != null)
+              Positioned(bottom: 0, left: 0, right: 0, child: _buildOpenSpaceOverlay(osMentions)),
+            // Local @ overlay
+            if (_openSpaceQuery == null && _mentionQuery != null && mentions.isNotEmpty)
+              Positioned(bottom: 0, left: 0, right: 0, child: _buildMentionOverlay(mentions)),
+            // Floating input bar
+            Positioned(bottom: 0, left: 0, right: 0, child: _buildInput()),
+          ],
+        ),
+      ),
+    ]);
+  }
+
+  Widget _buildHeader() => SafeArea(
+    bottom: false,
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: const BoxDecoration(color: kBg, border: Border(bottom: BorderSide(color: kBorder, width: 0.5))),
+      child: Row(children: [
+        GestureDetector(
+          onTap: widget.onOpenDrawer,
+          child: Container(width: 36, height: 36, decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+            child: const Icon(Icons.menu_rounded, size: 18, color: kMuted)),
+        ),
+        const SizedBox(width: 10),
+        const _ABLogo(),
+        const SizedBox(width: 9),
+        Text('AgentBase', style: GoogleFonts.inter(color: kText, fontSize: 16, fontWeight: FontWeight.w700, letterSpacing: -0.5)),
+        const Spacer(),
+        _IconBtn(icon: Icons.sync_rounded, onTap: widget.onSyncRequest, tooltip: 'Sync'),
+        const SizedBox(width: 6),
+        const NotificationBell(),
+        const SizedBox(width: 6),
+        _IconBtn(icon: Icons.article_outlined, onTap: _showPromptsSheet, tooltip: 'Prompts',
+          badge: widget.prompts.isNotEmpty ? '${widget.prompts.length}' : null),
+      ]),
+    ),
+  );
+
+  // ── @@ OpenSpace overlay ───────────────────────────────────────────────────
+  Widget _buildOpenSpaceOverlay(List<dynamic> suggestions) {
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 240),
+      decoration: BoxDecoration(
+        color: kCard,
+        border: const Border(
+          top: BorderSide(color: kBorder, width: 0.5),
+          bottom: BorderSide(color: kBorder, width: 0.5),
+        ),
+      ),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        // Header
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+          child: Row(children: [
+            Container(width: 20, height: 20, decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(5)),
+              child: const Icon(Icons.photo_library_outlined, size: 12, color: kAccentMid)),
+            const SizedBox(width: 8),
+            Text('OpenSpace', style: GoogleFonts.inter(color: kText, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 4),
+            Text('(@@)', style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
+            const Spacer(),
+            GestureDetector(
+              onTap: () => setState(() => _openSpaceQuery = null),
+              child: const Icon(Icons.close, size: 14, color: kMuted2),
+            ),
+          ]),
+        ),
+        const Divider(height: 1, color: kBorder),
+        if (_openSpaceLoading)
+          const Padding(
+            padding: EdgeInsets.all(20),
+            child: CircularProgressIndicator(color: kAccent, strokeWidth: 2),
+          )
+        else if (suggestions.isEmpty)
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Text(
+              _openSpaceImages.isEmpty ? 'Aucune image dans OpenSpace' : 'Aucun résultat pour "${_openSpaceQuery}"',
+              style: GoogleFonts.inter(color: kMuted2, fontSize: 12),
+            ),
+          )
+        else
+          Flexible(
+            child: ListView.builder(
+              shrinkWrap: true, padding: EdgeInsets.zero,
+              itemCount: suggestions.length,
+              itemBuilder: (_, i) {
+                final img = suggestions[i] as Map<String, dynamic>;
+                final name = img['name'] as String? ?? '';
+                final mention = img['mention'] as String? ?? '';
+                final rawUrl = img['rawUrl'] as String? ?? '';
+                return ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                  leading: ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: rawUrl.isNotEmpty
+                        ? Image.network(rawUrl, width: 40, height: 40, fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) => Container(width: 40, height: 40, color: kCard2,
+                              child: const Icon(Icons.broken_image_outlined, size: 18, color: kMuted2)))
+                        : Container(width: 40, height: 40, color: kCard2,
+                            child: const Icon(Icons.image_outlined, size: 18, color: kMuted2)),
+                  ),
+                  title: RichText(text: TextSpan(
+                    style: GoogleFonts.inter(color: kText, fontSize: 13),
+                    children: [
+                      TextSpan(text: mention, style: GoogleFonts.inter(color: kAccentMid, fontWeight: FontWeight.w700, fontSize: 13)),
+                    ],
+                  )),
+                  subtitle: Text(name, style: GoogleFonts.inter(color: kMuted2, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  onTap: () => _insertOpenSpaceMention(img),
+                );
+              },
+            ),
+          ),
+      ]),
+    );
+  }
+
+  Widget _buildMentionOverlay(List<AttachedFile> suggestions) => Container(
+    constraints: const BoxConstraints(maxHeight: 180),
+    decoration: const BoxDecoration(color: kCard, border: Border(top: BorderSide(color: kBorder, width: 0.5), bottom: BorderSide(color: kBorder, width: 0.5))),
+    child: ListView.builder(
+      shrinkWrap: true, padding: EdgeInsets.zero, itemCount: suggestions.length,
+      itemBuilder: (_, i) {
+        final f = suggestions[i];
+        return ListTile(
+          dense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+          leading: f.isImage
+              ? ClipRRect(borderRadius: BorderRadius.circular(4), child: Image.memory(f.bytes, width: 32, height: 32, fit: BoxFit.cover))
+              : Container(width: 32, height: 32, decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(4)),
+                  child: const Icon(Icons.insert_drive_file_outlined, size: 16, color: kAccentMid)),
+          title: RichText(text: TextSpan(style: GoogleFonts.inter(color: kText, fontSize: 13), children: [
+            TextSpan(text: '@', style: GoogleFonts.inter(color: kAccentMid, fontWeight: FontWeight.w700)),
+            TextSpan(text: f.name.replaceAll(' ', '_').replaceAll('.', '_')),
+          ])),
+          onTap: () => _insertMention(f),
+        );
+      },
+    ),
+  );
+
+  Widget _buildHome() => ListView(padding: const EdgeInsets.only(bottom: 120), children: [
+    const SizedBox(height: 48),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(children: [
+        Text('Que puis-je faire pour toi ?',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(color: kText, fontSize: 22, fontWeight: FontWeight.w700, letterSpacing: -0.6, height: 1.3)),
+        const SizedBox(height: 6),
+        Text('Compose un prompt, attache des fichiers, envoie dans une room.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(color: kMuted2, fontSize: 13, height: 1.5)),
+      ]),
+    ),
+    const SizedBox(height: 24),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(children: [
+        Row(children: [
+          Expanded(child: Padding(padding: const EdgeInsets.only(right: 6),
+            child: _ActionCard(icon: Icons.open_in_full_rounded, label: 'Plein écran', subtitle: 'Composer', color: kAccentMid, onTap: _openFullscreen))),
+          Expanded(child: _ActionCard(icon: Icons.workspaces_outlined, label: 'Mes Rooms', subtitle: 'Naviguer', color: kYellow, onTap: widget.onOpenDrawer)),
+        ]),
+        const SizedBox(height: 6),
+        Row(children: [
+          Expanded(child: Padding(padding: const EdgeInsets.only(right: 6),
+            child: _ActionCard(icon: Icons.notifications_outlined, label: 'Notifications', subtitle: 'Activité', color: kGreen, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => NotificationsScreen()))))),
+          Expanded(child: _ActionCard(icon: Icons.photo_library_outlined, label: 'OpenSpace', subtitle: 'Galerie partagée', color: const Color(0xFF8B5CF6), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => OpenspaceScreen(github: widget.github))))),
+        ]),
+      ]),
+    ),
+    const SizedBox(height: 16),
+    Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Text('DÉMARRER AVEC', style: GoogleFonts.inter(color: kMuted2, fontSize: 10.5, fontWeight: FontWeight.w600, letterSpacing: 0.8)),
+    ),
+    Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(children: [
+        Expanded(child: Padding(padding: const EdgeInsets.only(right: 6),
+          child: _SuggCard(icon: Icons.lightbulb_outline, label: 'Analyser un problème',
+            onTap: () { _ctrl.text = 'Analyser ce problème : '; _focus.requestFocus(); setState(() {}); }))),
+        Expanded(child: _SuggCard(icon: Icons.rule_outlined, label: 'Créer une règle agent',
+          onTap: () { _ctrl.text = 'Créer une règle agent : '; _focus.requestFocus(); setState(() {}); })),
+      ]),
+    ),
+    const SizedBox(height: 40),
+  ]);
+
+  Widget _buildMsgs() => ListView.builder(
+    controller: _scroll,
+    padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
+    itemCount: _msgs.length + (_sending ? 1 : 0),
+    itemBuilder: (_, i) {
+      if (i == _msgs.length) return const _TypingDots();
+      final m = _msgs[i];
+      return m.isUser ? _UserBubble(msg: m, onImageTap: _showImageFullscreen) : _AgentBubble(msg: m, github: widget.github);
+    },
+  );
+
+  Widget _buildInput() {
+    final hasContent = _ctrl.text.trim().isNotEmpty || _files.isNotEmpty;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
+        child: Container(
+          decoration: BoxDecoration(
+            color: kCard2,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: kBorder2, width: 1),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withOpacity(0.25), blurRadius: 16, offset: const Offset(0, 4)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+
+              // ── Fichiers attachés ──────────────────────────────────────
+              if (_files.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+                  child: SizedBox(
+                    height: 72,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _files.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      itemBuilder: (_, i) {
+                        final f = _files[i];
+                        return _FileChip(
+                          file: f,
+                          uploadFuture: _preUploads[f.name],
+                          onTap: f.isImage ? () => _showImageFullscreen(f.bytes, f.name) : null,
+                          onLongPress: () => _showFileMenu(i),
+                          onRemove: () => setState(() { _files.removeAt(i); _preUploads.remove(f.name); }),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+              // ── Zone de texte (max 10 lignes, puis scroll) ─────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 225),
+                  child: SingleChildScrollView(
+                    child: TextField(
+                      controller: _ctrl,
+                      focusNode: _focus,
+                      maxLines: null,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      onChanged: (_) => setState(() {}),
+                      style: GoogleFonts.inter(color: kText, fontSize: 14.5, height: 1.55),
+                      cursorColor: kAccent,
+                      cursorWidth: 1.5,
+                      decoration: InputDecoration(
+                        hintText: 'Écris ton prompt…',
+                        hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 14.5),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: true,
+                        fillColor: Colors.transparent,
+                        contentPadding: EdgeInsets.zero,
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              // ── Barre d'actions : [+] [spacer] [⛶] [✨] [↑] ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // [+] Attach
+                    GestureDetector(
+                      key: _attachKey,
+                      onTap: _showAttachMenu,
+                      child: Container(
+                        width: 32, height: 32,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF2A2A2D),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.add, size: 17, color: kMuted),
+                      ),
+                    ),
+
+                    const Spacer(),
+
+                    // Expand plein écran
+                    GestureDetector(
+                      onTap: _openFullscreen,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: const Icon(Icons.open_in_full_rounded, size: 14, color: kSubtle),
+                      ),
+                    ),
+
+                    // ✨ Gemini improve
+                    GestureDetector(
+                      onTap: _geminiImproving ? null : _showGeminiImprove,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: _geminiImproving
+                            ? const SizedBox(width: 20, height: 20,
+                                child: CircularProgressIndicator(color: Color(0xFF4285F4), strokeWidth: 1.5))
+                            : const Icon(Icons.auto_awesome, size: 18, color: Color(0xFF4285F4)),
+                      ),
+                    ),
+
+                    const SizedBox(width: 4),
+
+                    // ↑ Envoyer
+                    GestureDetector(
+                      onTap: hasContent ? _send : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        width: 34, height: 34,
+                        decoration: BoxDecoration(
+                          color: hasContent ? kAccent : const Color(0xFF2A2A2D),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: hasContent ? Colors.transparent : kBorder, width: 0.5),
+                        ),
+                        child: Icon(Icons.arrow_upward_rounded, size: 18,
+                          color: hasContent ? Colors.white : kMuted2),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showFileMenu(int i) {
+    final f = _files[i];
+    showModalBottomSheet(
+      context: context, backgroundColor: kCard,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => SafeArea(top: false, child: Column(mainAxisSize: MainAxisSize.min, children: [
+        const AppDragHandle(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          child: Row(children: [
+            const Icon(Icons.insert_drive_file_outlined, size: 16, color: kMuted2),
+            const SizedBox(width: 8),
+            Expanded(child: Text(f.name, style: GoogleFonts.inter(color: kText, fontSize: 14, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis)),
+          ]),
+        ),
+        const AppDivider(),
+        if (f.isImage)
+          ListTile(
+            leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.edit_outlined, size: 18, color: kAccentMid)),
+            title: Text('Éditer l\'image', style: GoogleFonts.inter(color: kText, fontSize: 14)),
+            subtitle: Text('Réglages · Rogner · Dessin · Rotation', style: GoogleFonts.inter(color: kMuted2, fontSize: 11.5)),
+            onTap: () { Navigator.pop(context); _editImage(i); },
+          ),
+        ListTile(
+          leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.drive_file_rename_outline, size: 18, color: kMuted)),
+          title: Text('Renommer', style: GoogleFonts.inter(color: kText, fontSize: 14)),
+          onTap: () { Navigator.pop(context); _renameFile(i); },
+        ),
+        ListTile(
+          leading: Container(width: 36, height: 36, decoration: BoxDecoration(color: kRedSub.withOpacity(0.5), borderRadius: BorderRadius.circular(8)), child: const Icon(Icons.delete_outline, size: 18, color: kRed)),
+          title: Text('Supprimer', style: GoogleFonts.inter(color: kRed, fontSize: 14)),
+          onTap: () { Navigator.pop(context); setState(() => _files.removeAt(i)); },
+        ),
+        const SizedBox(height: 8),
+      ])),
+    );
+  }
+}
+
+// ── _FileChip ─────────────────────────────────────────────────────────────────
+class _FileChip extends StatelessWidget {
+  final AttachedFile file;
+  final Future<String?>? uploadFuture;
+  final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
+  final VoidCallback onRemove;
+  const _FileChip({required this.file, this.uploadFuture, this.onTap, this.onLongPress, required this.onRemove});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap, onLongPress: onLongPress,
+    child: Stack(children: [
+      file.isImage
+          ? ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.memory(file.bytes, width: 78, height: 78, fit: BoxFit.cover))
+          : Container(
+              width: 78, height: 78,
+              decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+              child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                const Icon(Icons.insert_drive_file_outlined, color: kAccentMid, size: 24),
+                const SizedBox(height: 3),
+                Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(file.name, style: GoogleFonts.inter(color: kMuted2, fontSize: 8.5), maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
+              ])),
+      // Upload indicator — spinner while uploading, check when done
+      if (uploadFuture != null) Positioned(
+        top: 3, left: 3,
+        child: FutureBuilder<String?>(
+          future: uploadFuture,
+          builder: (_, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return Container(
+                width: 18, height: 18,
+                decoration: BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
+                padding: const EdgeInsets.all(3),
+                child: const CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5),
+              );
+            }
+            if (snap.data != null) {
+              return Container(
+                width: 18, height: 18,
+                decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
+                child: const Icon(Icons.check, size: 11, color: Colors.white),
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+      if (file.isImage) Positioned(
+        bottom: 3, left: 3,
+        child: GestureDetector(
+          onTap: onLongPress,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: BoxDecoration(color: Colors.black.withOpacity(0.75), borderRadius: BorderRadius.circular(6)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: const [
+              Icon(Icons.edit, size: 12, color: Colors.white),
+              SizedBox(width: 3),
+              Text('Éditer', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w600)),
+            ]),
+          ),
+        ),
+      ),
+      Positioned(
+        top: 2, right: 2,
+        child: GestureDetector(
+          onTap: onRemove,
+          child: Container(
+            width: 18, height: 18,
+            decoration: BoxDecoration(color: kBg.withOpacity(0.85), shape: BoxShape.circle, border: Border.all(color: kBorder, width: 0.5)),
+            child: const Icon(Icons.close, size: 11, color: kText),
+          ),
+        ),
+      ),
+    ]),
+  );
+}
+
+// ── _ToolBtn / _IconBtn ───────────────────────────────────────────────────────
+class _ToolBtn extends StatelessWidget {
+  final IconData icon; final VoidCallback onTap; final String tooltip;
+  const _ToolBtn({required this.icon, required this.onTap, required this.tooltip});
+  @override
+  Widget build(BuildContext context) => IconButton(
+    icon: Icon(icon, size: 18, color: kMuted2), onPressed: onTap, tooltip: tooltip,
+    splashRadius: 18, constraints: const BoxConstraints(minWidth: 34, minHeight: 34), padding: const EdgeInsets.all(6),
+  );
+}
+
+class _IconBtn extends StatelessWidget {
+  final IconData icon; final VoidCallback onTap; final String tooltip; final String? badge;
+  const _IconBtn({required this.icon, required this.onTap, required this.tooltip, this.badge});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Stack(clipBehavior: Clip.none, children: [
+      Container(width: 36, height: 36, decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+        child: Icon(icon, size: 17, color: kMuted)),
+      if (badge != null) Positioned(
+        top: -4, right: -4,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(color: kAccent, borderRadius: BorderRadius.circular(99)),
+          child: Text(badge!, style: GoogleFonts.inter(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w700)),
+        ),
+      ),
+    ]),
+  );
+}
+
+class _ActionCard extends StatelessWidget {
+  final IconData icon; final String label, subtitle; final Color color; final VoidCallback onTap;
+  const _ActionCard({required this.icon, required this.label, required this.subtitle, required this.color, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(12), border: Border.all(color: kBorder, width: 0.5)),
+      child: Row(children: [
+        Container(width: 34, height: 34, decoration: BoxDecoration(color: color.withOpacity(0.12), borderRadius: BorderRadius.circular(9)),
+          child: Icon(icon, size: 17, color: color)),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(label, style: GoogleFonts.inter(color: kText, fontSize: 12.5, fontWeight: FontWeight.w600), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(subtitle, style: GoogleFonts.inter(color: kMuted2, fontSize: 11)),
+        ])),
+      ]),
+    ),
+  );
+}
+
+class _SuggCard extends StatelessWidget {
+  final IconData icon; final String label; final VoidCallback onTap;
+  const _SuggCard({required this.icon, required this.label, required this.onTap});
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(width: 30, height: 30, decoration: BoxDecoration(color: kAccentSub, borderRadius: BorderRadius.circular(8)), child: Icon(icon, size: 15, color: kAccentMid)),
+        const SizedBox(height: 10),
+        Text(label, style: GoogleFonts.inter(color: kText2, fontSize: 12.5, height: 1.4)),
+      ]),
+    ),
+  );
+}
+
+// ── Msg model ─────────────────────────────────────────────────────────────────
+enum _MsgKind { user, promptSaved, agentError }
+
+class _Msg {
+  final _MsgKind kind;
+  final String text;
+  final List<AttachedFile> files;
+  final Room? room;
+  final SavedPrompt? prompt;
+  _Msg._({required this.kind, this.text = '', this.files = const [], this.room, this.prompt});
+  factory _Msg.user(String t, List<AttachedFile> f, Room? r) => _Msg._(kind: _MsgKind.user, text: t, files: f, room: r);
+  factory _Msg.promptSaved(SavedPrompt p) => _Msg._(kind: _MsgKind.promptSaved, prompt: p);
+  factory _Msg.agentError(String t) => _Msg._(kind: _MsgKind.agentError, text: t);
+  bool get isUser => kind == _MsgKind.user;
+}
+
+// ── _UserBubble ───────────────────────────────────────────────────────────────
+class _UserBubble extends StatelessWidget {
+  final _Msg msg;
+  final void Function(Uint8List, String) onImageTap;
+  const _UserBubble({required this.msg, required this.onImageTap});
+
+  AttachedFile? _findFile(String mention) {
+    final needle = mention.toLowerCase();
+    for (final f in msg.files) {
+      // Match by base name (without extension), spaces→_
+      final dot = f.name.lastIndexOf('.');
+      final slug = (dot > 0 ? f.name.substring(0, dot) : f.name)
+          .replaceAll(' ', '_').toLowerCase();
+      if (slug == needle || f.name.toLowerCase() == needle) return f;
+      if (slug.startsWith(needle)) return f;
+    }
+    return null;
+  }
+
+  Set<String> _mentionedFileNames() {
+    final pattern = RegExp(r'@(\w+)');
+    final found = <String>{};
+    for (final m in pattern.allMatches(msg.text)) {
+      final f = _findFile(m.group(1)!);
+      if (f != null) found.add(f.name);
+    }
+    return found;
+  }
+
+  Widget _buildContent() {
+    final text = msg.text;
+    final pattern = RegExp(r'@(\w+)');
+    final matches = pattern.allMatches(text).toList();
+    final textStyle = GoogleFonts.inter(color: Colors.white, fontSize: 13.5, height: 1.5);
+    if (matches.isEmpty) return Text(text, style: textStyle);
+    final seenFiles = <String>{};
+    final widgets = <Widget>[];
+    int lastEnd = 0;
+    for (final match in matches) {
+      if (match.start > lastEnd) {
+        final t = text.substring(lastEnd, match.start).trimRight();
+        if (t.isNotEmpty) widgets.add(Text(t, style: textStyle));
+      }
+      final f = _findFile(match.group(1)!);
+      if (f != null && f.isImage) {
+        if (seenFiles.contains(f.name)) {
+          widgets.add(Container(
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(color: Colors.white12, borderRadius: BorderRadius.circular(6)),
+            child: Text('${match.group(0)} ↑', style: GoogleFonts.inter(color: Colors.white60, fontSize: 11.5)),
+          ));
+        } else {
+          seenFiles.add(f.name);
+          widgets.add(Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: GestureDetector(
+              onTap: () => onImageTap(f.bytes, f.name),
+              child: ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.memory(f.bytes, width: double.infinity, fit: BoxFit.cover)),
+            ),
+          ));
+        }
+      } else {
+        widgets.add(Text(match.group(0)!, style: GoogleFonts.inter(color: kAccentMid, fontSize: 13.5, fontWeight: FontWeight.w600)));
+      }
+      lastEnd = match.end;
+    }
+    if (lastEnd < text.length) {
+      final t = text.substring(lastEnd).trimLeft();
+      if (t.isNotEmpty) widgets.add(Padding(padding: const EdgeInsets.only(top: 4), child: Text(t, style: textStyle)));
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: widgets);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final mentioned = _mentionedFileNames();
+    return Align(
+      alignment: Alignment.centerRight,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.85),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (msg.files.any((f) => f.isImage && !mentioned.contains(f.name)))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Wrap(spacing: 4, runSpacing: 4, alignment: WrapAlignment.end,
+                  children: msg.files.where((f) => f.isImage && !mentioned.contains(f.name)).map((f) =>
+                    GestureDetector(
+                      onTap: () => onImageTap(f.bytes, f.name),
+                      child: ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(f.bytes, width: 64, height: 64, fit: BoxFit.cover)),
+                    )
+                  ).toList(),
+                ),
+              ),
+            ...msg.files.where((f) => !f.isImage).map((f) => Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(color: kCard, borderRadius: BorderRadius.circular(6), border: Border.all(color: kBorder, width: 0.5)),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.attach_file, size: 12, color: kAccentMid),
+                const SizedBox(width: 4),
+                Text(f.name, style: GoogleFonts.inter(color: kMuted, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ]),
+            )),
+            if (msg.text.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: const BoxDecoration(
+                  color: kAccent,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(14), topRight: Radius.circular(14),
+                    bottomLeft: Radius.circular(14), bottomRight: Radius.circular(3),
+                  ),
+                ),
+                child: _buildContent(),
+              ),
+            if (msg.room != null) Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.workspaces_outlined, size: 10, color: kAccentMid.withOpacity(0.7)),
+                const SizedBox(width: 3),
+                Text(msg.room!.name, style: GoogleFonts.inter(color: kMuted2, fontSize: 10.5)),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+// ── _AgentBubble ──────────────────────────────────────────────────────────────
+class _AgentBubble extends StatefulWidget {
+  final _Msg msg;
+  final GitHubService github;
+  const _AgentBubble({required this.msg, required this.github});
+  @override State<_AgentBubble> createState() => _AgentBubbleState();
+}
+
+class _AgentBubbleState extends State<_AgentBubble> {
+  bool _copiedMd = false;
+  bool _copiedLink = false;
+  bool _loadingMd = false;
+
+  Future<void> _copyMd() async {
+    final p = widget.msg.prompt!;
+    setState(() => _loadingMd = true);
+    try {
+      final content = await widget.github.fetchPromptContent(p.id);
+      if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: content ?? p.link));
+      setState(() { _loadingMd = false; _copiedMd = true; });
+      if (context.mounted) showAppSnack(context, 'Contenu copié !');
+      Future.delayed(const Duration(seconds: 2), () { if (mounted) setState(() => _copiedMd = false); });
+    } catch (_) {
+      if (mounted) setState(() => _loadingMd = false);
+    }
+  }
+
+  Future<void> _copyLink() async {
+    final p = widget.msg.prompt!;
+    await Clipboard.setData(ClipboardData(text: p.link));
+    if (!mounted) return;
+    setState(() => _copiedLink = true);
+    if (context.mounted) showAppSnack(context, 'Lien copié !');
+    Future.delayed(const Duration(seconds: 2), () { if (mounted) setState(() => _copiedLink = false); });
+  }
+
+  Future<void> _openLink() async {
+    final p = widget.msg.prompt!;
+    final uri = Uri.tryParse(p.link);
+    if (uri != null && await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final m = widget.msg;
+    final isError = m.kind == _MsgKind.agentError;
+    if (m.kind == _MsgKind.promptSaved) {
+      final p = m.prompt!;
+      final numLabel = p.number > 0 ? 'Prompt #${p.number}' : 'Prompt';
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: AppCard(
+          padding: const EdgeInsets.all(12),
+          color: kGreenSub.withOpacity(0.5),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // Top row : ✓ Sauvegardé | Prompt #N badge
+            Row(children: [
+              const Icon(Icons.check_circle_outline, size: 15, color: kGreen),
+              const SizedBox(width: 6),
+              Text('Sauvegardé', style: GoogleFonts.inter(color: kGreen, fontSize: 12.5, fontWeight: FontWeight.w600)),
+              const Spacer(),
+              AppBadge(numLabel, bg: kGreenSub, fg: kGreen),
+            ]),
+            const SizedBox(height: 10),
+            // Redirect button
+            GestureDetector(
+              onTap: _openLink,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: kCard2,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: kBorder, width: 0.5),
+                ),
+                child: Row(children: [
+                  const Icon(Icons.open_in_new, size: 13, color: kBlue),
+                  const SizedBox(width: 6),
+                  Text('Voir le prompt', style: GoogleFonts.inter(color: kBlue, fontSize: 12.5)),
+                ]),
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Bottom row : [Copier MD] [Copier lien] | nom
+            Row(children: [
+              GestureDetector(
+                onTap: _loadingMd ? null : _copyMd,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: kGreenSub, borderRadius: BorderRadius.circular(6), border: Border.all(color: kGreen.withOpacity(0.2), width: 0.5)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    _loadingMd
+                        ? const SizedBox(width: 11, height: 11, child: CircularProgressIndicator(strokeWidth: 1.5, color: kGreen))
+                        : Icon(_copiedMd ? Icons.check : Icons.content_copy, size: 11, color: kGreen),
+                    const SizedBox(width: 4),
+                    Text(_copiedMd ? 'Copié !' : 'Copier MD', style: GoogleFonts.inter(color: kGreen, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+              const SizedBox(width: 6),
+              GestureDetector(
+                onTap: _copyLink,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(6), border: Border.all(color: kBorder, width: 0.5)),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Icon(_copiedLink ? Icons.check : Icons.link, size: 11, color: kMuted),
+                    const SizedBox(width: 4),
+                    Text(_copiedLink ? 'Copié !' : 'Copier lien', style: GoogleFonts.inter(color: kMuted, fontSize: 11, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+              const Spacer(),
+              if (p.name.isNotEmpty)
+                Flexible(child: Text(p.name, style: GoogleFonts.inter(color: kMuted2, fontSize: 10), maxLines: 1, overflow: TextOverflow.ellipsis)),
+            ]),
+          ]),
+        ),
+      );
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.82),
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: isError ? kRedSub.withOpacity(0.6) : kCard,
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(3), topRight: Radius.circular(14), bottomLeft: Radius.circular(14), bottomRight: Radius.circular(14)),
+              border: Border.all(color: isError ? kRed.withOpacity(0.3) : kBorder, width: 0.5),
+            ),
+            child: Text(m.text, style: GoogleFonts.inter(color: isError ? kRed : kText2, fontSize: 13.5, height: 1.5)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── _TypingDots ───────────────────────────────────────────────────────────────
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+  @override State<_TypingDots> createState() => _TypingDotsState();
+}
+class _TypingDotsState extends State<_TypingDots> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  @override void initState() { super.initState(); _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 900))..repeat(); }
+  @override void dispose() { _ctrl.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Row(mainAxisSize: MainAxisSize.min, children: List.generate(3, (i) => AnimatedBuilder(
+      animation: _ctrl,
+      builder: (_, __) {
+        final t = ((_ctrl.value - i * 0.15) % 1.0).clamp(0.0, 1.0);
+        final opacity = (0.3 + 0.7 * (t < 0.5 ? t * 2 : (1 - t) * 2)).clamp(0.3, 1.0);
+        return Container(margin: const EdgeInsets.only(right: 4), width: 7, height: 7,
+          decoration: BoxDecoration(color: kMuted2.withOpacity(opacity), shape: BoxShape.circle));
+      },
+    ))),
+  );
+}
+
+// ── Smart title generator ─────────────────────────────────────────────────────
+String _smartTitle(String raw) {
+  if (raw.isEmpty) return '';
+  var s = raw
+      .replaceAll(RegExp(r'#{1,6}\s*'), '')
+      .replaceAll(RegExp(r'[*_`~>]'), '')
+      .replaceAll(RegExp(r'\[([^\]]+)\]\([^)]+\)', dotAll: true), r'$1')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  // Take first sentence (end at . ? ! followed by space or end)
+  final sentMatch = RegExp(r'^(.+?[.?!])(\s|$)').firstMatch(s);
+  if (sentMatch != null && sentMatch.group(1)!.length >= 8) {
+    s = sentMatch.group(1)!.trim();
+  }
+  // Fallback: first line
+  final firstLine = s.split('\n').first.trim();
+  if (firstLine.isNotEmpty) s = firstLine;
+  // Truncate at word boundary
+  if (s.length > 60) {
+    s = s.substring(0, 57);
+    final last = s.lastIndexOf(' ');
+    if (last > 15) s = s.substring(0, last);
+    s = '$s…';
+  }
+  return s.isNotEmpty ? s : raw.split(' ').take(5).join(' ');
+}
+
+// ── Professional AB Logo ──────────────────────────────────────────────────────
+class _ABLogo extends StatelessWidget {
+  const _ABLogo();
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    size: const Size(28, 28),
+    painter: _ABLogoPainter(),
+  );
+}
+
+class _ABLogoPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width, h = size.height;
+    final r = w * 0.22;
+
+    // Background rect
+    final bgPaint = Paint()
+      ..shader = const LinearGradient(
+        colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ).createShader(Rect.fromLTWH(0, 0, w, h));
+    canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(0, 0, w, h), Radius.circular(r)), bgPaint);
+
+    // Draw ">" symbol — terminal / agent feel
+    final stroke = Paint()
+      ..color = Colors.white.withOpacity(0.95)
+      ..strokeWidth = w * 0.12
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round
+      ..style = PaintingStyle.stroke;
+
+    final cx = w * 0.42, cy = h * 0.5, hw = w * 0.18, hh = h * 0.22;
+    final path = Path()
+      ..moveTo(cx - hw, cy - hh)
+      ..lineTo(cx + hw, cy)
+      ..lineTo(cx - hw, cy + hh);
+    canvas.drawPath(path, stroke);
+
+    // Small dot after ">"
+    final dot = Paint()..color = Colors.white.withOpacity(0.75)..style = PaintingStyle.fill;
+    canvas.drawCircle(Offset(cx + hw * 1.9, cy), w * 0.065, dot);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── _AttachSheet ──────────────────────────────────────────────────────────────
+/// ChatGPT-style attachment picker. Shows as a bottom sheet with options.
+/// When OpenSpace is selected, displays the image/video grid inline.
+class _AttachSheet extends StatefulWidget {
+  final GitHubService github;
+  final VoidCallback onFiles;
+  final VoidCallback onGallery;
+  final VoidCallback onCamera;
+  final Future<void> Function(OpenspaceImage) onOpenSpacePick;
+  // Prompt config (tab 2)
+  final String promptText;
+  final String promptName;
+  final Room? selectedRoom;
+  final List<Room> rooms;
+  final void Function(String) onNameSaved;
+  final void Function(Room?) onRoomSelected;
+
+  const _AttachSheet({
+    required this.github,
+    required this.onFiles,
+    required this.onGallery,
+    required this.onCamera,
+    required this.onOpenSpacePick,
+    required this.promptText,
+    required this.promptName,
+    required this.selectedRoom,
+    required this.rooms,
+    required this.onNameSaved,
+    required this.onRoomSelected,
+  });
+
+  @override
+  State<_AttachSheet> createState() => _AttachSheetState();
+}
+
+class _AttachSheetState extends State<_AttachSheet> {
+  bool _showOpenSpace = false;
+  List<dynamic> _osFiles = [];
+  bool _osLoading = false;
+  String _osSearch = '';
+  final _osSearchCtrl = TextEditingController();
+  int _activeTab = 0; // 0 = Fichiers, 1 = Prompt
+  late final TextEditingController _nameCtrl;
+  Room? _selectedRoom;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.promptName);
+    _selectedRoom = widget.selectedRoom;
+  }
+
+  @override
+  void dispose() {
+    _osSearchCtrl.dispose();
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadOpenSpace() async {
+    setState(() => _osLoading = true);
+    try {
+      final files = await widget.github.fetchOpenspaceFiles();
+      if (mounted) setState(() { _osFiles = files; _osLoading = false; });
+    } catch (_) {
+      if (mounted) setState(() => _osLoading = false);
+    }
+  }
+
+  void _openOpenSpace() {
+    setState(() => _showOpenSpace = true);
+    _loadOpenSpace();
+  }
+
+  List<dynamic> get _filtered {
+    if (_osSearch.isEmpty) return _osFiles;
+    final q = _osSearch.toLowerCase();
+    return _osFiles.where((f) => (f['name'] as String).toLowerCase().contains(q)).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: kCard,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+          border: Border(top: BorderSide(color: kBorder, width: 0.5)),
+        ),
+        child: SafeArea(
+          top: false,
+          child: _showOpenSpace ? _buildOpenSpace() : _buildContent(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContent() => Column(mainAxisSize: MainAxisSize.min, children: [
+    const AppDragHandle(),
+    // Tab selector row
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Row(children: [
+        _SheetTab(
+          label: 'Fichiers', icon: Icons.attach_file, selected: _activeTab == 0,
+          onTap: () => setState(() { _activeTab = 0; _showOpenSpace = false; }),
+        ),
+        const SizedBox(width: 8),
+        _SheetTab(
+          label: 'Prompt', icon: Icons.edit_note_rounded, selected: _activeTab == 1,
+          onTap: () => setState(() => _activeTab = 1),
+        ),
+      ]),
+    ),
+    if (_activeTab == 0) _buildAttachMenu() else _buildPromptConfig(),
+  ]);
+
+  Widget _buildAttachMenu() => Padding(
+    padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+    child: Column(mainAxisSize: MainAxisSize.min, children: [
+      _AttachOption(icon: Icons.photo_camera_outlined, title: 'Caméra', subtitle: 'Prendre une photo', color: kGreen, onTap: widget.onCamera),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.photo_library_outlined, title: 'Galerie', subtitle: 'Photos & vidéos', color: kAccentMid, onTap: widget.onGallery),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.folder_outlined, title: 'Fichiers', subtitle: 'Tout type de fichier', color: kYellow, onTap: widget.onFiles),
+      const SizedBox(height: 2),
+      _AttachOption(icon: Icons.cloud_outlined, title: 'OpenSpace', subtitle: 'Galerie partagée', color: const Color(0xFF8B5CF6), onTap: _openOpenSpace),
+    ]),
+  );
+
+  Widget _buildPromptConfig() => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      Text('Nom du prompt', style: GoogleFonts.inter(color: kMuted2, fontSize: 12, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      Container(
+        decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Row(children: [
+          Expanded(
+            child: TextField(
+              controller: _nameCtrl,
+              style: GoogleFonts.inter(color: kText, fontSize: 13.5),
+              cursorColor: kAccent,
+              decoration: InputDecoration(
+                hintText: 'Auto-généré si vide',
+                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 13.5),
+                border: InputBorder.none,
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                isDense: true,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: () {
+              final auto = _smartTitle(widget.promptText);
+              if (auto.isNotEmpty) setState(() => _nameCtrl.text = auto);
+            },
+            child: const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.refresh, size: 16, color: kMuted2)),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      Text('Assigner à une room', style: GoogleFonts.inter(color: kMuted2, fontSize: 12, fontWeight: FontWeight.w500)),
+      const SizedBox(height: 8),
+      SizedBox(
+        height: 40,
+        child: ListView(scrollDirection: Axis.horizontal, children: [
+          _RoomChipLocal(
+            label: 'Aucune', icon: Icons.remove_circle_outline, color: kMuted2,
+            selected: _selectedRoom == null,
+            onTap: () { setState(() => _selectedRoom = null); widget.onRoomSelected(null); },
+          ),
+          ...widget.rooms.map((r) => _RoomChipLocal(
+            label: r.name, icon: r.iconData, color: r.accentColor,
+            selected: _selectedRoom?.id == r.id,
+            onTap: () { setState(() => _selectedRoom = r); widget.onRoomSelected(r); },
+          )),
+        ]),
+      ),
+      const SizedBox(height: 16),
+      SizedBox(
+        width: double.infinity,
+        child: GestureDetector(
+          onTap: () {
+            widget.onNameSaved(_nameCtrl.text.trim());
+            Navigator.pop(context);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            decoration: BoxDecoration(color: kAccent, borderRadius: BorderRadius.circular(10)),
+            alignment: Alignment.center,
+            child: Text('Confirmer', style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ),
+    ]),
+  );
+
+  Widget _buildOpenSpace() => Column(mainAxisSize: MainAxisSize.min, children: [
+    Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+      child: Row(children: [
+        GestureDetector(
+          onTap: () => setState(() { _showOpenSpace = false; _osSearch = ''; _osSearchCtrl.clear(); }),
+          child: Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(8), border: Border.all(color: kBorder, width: 0.5)),
+            child: const Icon(Icons.arrow_back_ios_new, size: 13, color: kMuted),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Container(
+            height: 34,
+            decoration: BoxDecoration(color: kCard2, borderRadius: BorderRadius.circular(10), border: Border.all(color: kBorder, width: 0.5)),
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: TextField(
+              controller: _osSearchCtrl,
+              onChanged: (v) => setState(() => _osSearch = v),
+              style: GoogleFonts.inter(color: kText, fontSize: 13),
+              cursorColor: kAccent,
+              decoration: InputDecoration(
+                hintText: 'Rechercher…',
+                hintStyle: GoogleFonts.inter(color: kMuted2, fontSize: 13),
+                border: InputBorder.none,
+                filled: true,
+                fillColor: Colors.transparent,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+                prefixIcon: const Padding(padding: EdgeInsets.only(right: 6), child: Icon(Icons.search, size: 16, color: kMuted2)),
+                prefixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
+              ),
+            ),
+          ),
+        ),
+      ]),
+    ),
+    const AppDivider(),
+    ConstrainedBox(
+      constraints: const BoxConstraints(maxHeight: 320),
+      child: _osLoading
+          ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: kAccent, strokeWidth: 2)))
+          : _filtered.isEmpty
+              ? Center(child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Text(_osFiles.isEmpty ? 'Aucun fichier dans OpenSpace' : 'Aucun résultat',
+                    style: GoogleFonts.inter(color: kMuted2, fontSize: 13)),
+                ))
+              : GridView.builder(
+                  padding: const EdgeInsets.all(12),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3, crossAxisSpacing: 8, mainAxisSpacing: 8),
+                  itemCount: _filtered.length,
+                  itemBuilder: (_, i) {
+                    final f = _filtered[i] as Map<String, dynamic>;
+                    final name = f['name'] as String;
+                    final rawUrl = f['rawUrl'] as String;
+                    final isVideo = f['isVideo'] as bool? ?? false;
+                    return GestureDetector(
+                      onTap: () async {
+                        final img = OpenspaceImage(
+                          name: name,
+                          mention: f['mention'] as String? ?? '@$name',
+                          rawUrl: rawUrl,
+                          sha: f['sha'] as String? ?? '',
+                          isVideo: isVideo,
+                        );
+                        await widget.onOpenSpacePick(img);
+                      },
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Stack(fit: StackFit.expand, children: [
+                          isVideo
+                              ? Container(color: kCard2, child: const Icon(Icons.videocam_outlined, color: kMuted2, size: 28))
+                              : CachedNetworkImage(
+                                  imageUrl: rawUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) => Container(color: kCard2),
+                                  errorWidget: (_, __, ___) => Container(color: kCard2, child: const Icon(Icons.broken_image_outlined, color: kMuted2, size: 20)),
+                                ),
+                          if (isVideo)
+                            Positioned(top: 4, left: 4, child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                              decoration: BoxDecoration(color: Colors.black54, borderRadius: BorderRadius.circular(4)),
+                              child: const Icon(Icons.play_arrow, size: 12, color: Colors.white),
+                            )),
+                          Positioned(bottom: 0, left: 0, right: 0, child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                            color: Colors.black.withOpacity(0.5),
+                            child: Text(name, style: GoogleFonts.inter(color: Colors.white70, fontSize: 9), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          )),
+                        ]),
+                      ),
+                    );
+                  },
+                ),
+    ),
+    const SizedBox(height: 8),
+  ]);
+}
+
+// ── Tab button for the attach sheet ──────────────────────────────────────────
+class _SheetTab extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+  const _SheetTab({required this.label, required this.icon, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: selected ? kAccent.withOpacity(0.12) : kCard2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: selected ? kAccent.withOpacity(0.4) : kBorder, width: 0.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 14, color: selected ? kAccentMid : kMuted2),
+        const SizedBox(width: 6),
+        Text(label, style: GoogleFonts.inter(
+          color: selected ? kAccentMid : kMuted2,
+          fontSize: 13,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+        )),
+      ]),
+    ),
+  );
+}
+
+// ── Small room chip inside the prompt tab ─────────────────────────────────────
+class _RoomChipLocal extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+  const _RoomChipLocal({required this.label, required this.icon, required this.color, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      margin: const EdgeInsets.only(right: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: selected ? color.withOpacity(0.12) : kCard2,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: selected ? color.withOpacity(0.5) : kBorder, width: 0.5),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 13, color: selected ? color : kMuted2),
+        const SizedBox(width: 5),
+        Text(label, style: GoogleFonts.inter(
+          color: selected ? color : kMuted2,
+          fontSize: 12.5,
+          fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+        )),
+      ]),
+    ),
+  );
 }
 
 class _AttachOption extends StatelessWidget {

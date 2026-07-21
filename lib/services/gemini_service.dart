@@ -15,8 +15,13 @@ class GeminiService {
   static const String _kCurrentIndex = 'gemini_current_key_idx';
   static const String _kExhaustedUntil = 'gemini_exhausted_until';
 
+  // Primary model and fallback list — v1beta stable names
   static const _baseUrl =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent';
+  static const _fallbackUrls = [
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent',
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent',
+  ];
 
   static final GeminiService _instance = GeminiService._();
   GeminiService._();
@@ -93,10 +98,10 @@ class GeminiService {
     return null;
   }
 
-  Future<GeminiApiResult> _callGemini(
-      String key, List<Map<String, dynamic>> contents) async {
+  Future<GeminiApiResult> _callGeminiUrl(
+      String endpointUrl, String key, List<Map<String, dynamic>> contents) async {
     try {
-      final url = Uri.parse('$_baseUrl?key=$key');
+      final url = Uri.parse('$endpointUrl?key=$key');
       final response = await http
           .post(
             url,
@@ -110,6 +115,11 @@ class GeminiService {
         if (idx != -1) await _markExhausted(idx);
         return GeminiApiResult(
             text: '', success: false, error: 'quota_exceeded');
+      }
+      if (response.statusCode == 404) {
+        // Model not found at this endpoint — try next
+        return GeminiApiResult(
+            text: '', success: false, error: 'model_not_found');
       }
       if (response.statusCode != 200) {
         return GeminiApiResult(
@@ -130,6 +140,18 @@ class GeminiService {
     } catch (e) {
       return GeminiApiResult(text: '', success: false, error: e.toString());
     }
+  }
+
+  Future<GeminiApiResult> _callGemini(
+      String key, List<Map<String, dynamic>> contents) async {
+    // Try primary URL first, then fallbacks if 404
+    final urls = [_baseUrl, ..._fallbackUrls];
+    for (final endpoint in urls) {
+      final result = await _callGeminiUrl(endpoint, key, contents);
+      if (result.error != 'model_not_found') return result;
+    }
+    return GeminiApiResult(
+        text: '', success: false, error: 'Aucun modèle Gemini disponible (404)');
   }
 
   Future<GeminiApiResult> generate(List<Map<String, dynamic>> contents) async {

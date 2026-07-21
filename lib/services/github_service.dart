@@ -591,56 +591,51 @@ class GitHubService {
     if (_pat.isEmpty) throw Exception('PAT non configuré — va dans Paramètres');
     if (owner.isEmpty) throw Exception('Owner GitHub non configuré — va dans Paramètres');
 
-    // urlMap  : nom original → URL raw GitHub (stockage permanent)
-    // inlineMap: nom original → data URI base64 (affichage inline Claude/ChatGPT)
-    final urlMap    = <String, String>{};
-    final inlineMap = <String, String>{};
+    // urlMap: nom original → URL raw GitHub permanente
+    // On utilise les URLs GitHub brutes (pas de data URI) pour que le contenu reste léger
+    final urlMap = <String, String>{};
 
     for (final f in files) {
       final safeName = f.name.replaceAll(' ', '_');
-      // Use pre-uploaded URL if available (uploaded while user was typing)
-      if (preUploadedUrls.containsKey(f.name)) {
-        urlMap[f.name] = preUploadedUrls[f.name]!;
-      } else {
-        // Upload vers GitHub pour la sauvegarde
-        try {
-          final url = await _uploadAsset('assets/prompts/$id/$safeName', f.bytes);
-          urlMap[f.name] = url;
-        } catch (_) {}
+      // Upload vers dossier final (assets/prompts/$id/)
+      try {
+        final url = await _uploadAsset('assets/prompts/$id/$safeName', f.bytes);
+        urlMap[f.name] = url;
+      } catch (_) {
+        // Fallback : utilise l'URL de staging si déjà uploadé
+        if (preUploadedUrls.containsKey(f.name)) {
+          urlMap[f.name] = preUploadedUrls[f.name]!;
+        }
       }
-      // Construit la data URI base64 pour l'affichage inline (Claude / ChatGPT)
-      if (f.isImage) {
-        final dataUri = _imageDataUri(f.name, f.bytes);
-        inlineMap[f.name] = dataUri ?? (urlMap[f.name] ?? '');
-      } else {
-        inlineMap[f.name] = urlMap[f.name] ?? '';
+    }
+
+    // Résout le nom original d'un fichier depuis une @mention
+    // Utilise le nom de base sans extension (espaces→_)
+    String resolveFileName(String mention) {
+      final needle = mention.toLowerCase();
+      // 1. Correspondance exacte sur slug (base sans extension, espaces→_)
+      for (final key in urlMap.keys) {
+        final dot = key.lastIndexOf('.');
+        final slug = (dot > 0 ? key.substring(0, dot) : key)
+            .replaceAll(' ', '_').toLowerCase();
+        if (slug == needle) return key;
       }
+      // 2. Nom complet exact
+      for (final key in urlMap.keys) {
+        if (key.toLowerCase() == needle) return key;
+      }
+      // 3. Slug préfixe
+      for (final key in urlMap.keys) {
+        final dot = key.lastIndexOf('.');
+        final slug = (dot > 0 ? key.substring(0, dot) : key)
+            .replaceAll(' ', '_').toLowerCase();
+        if (slug.startsWith(needle)) return key;
+      }
+      return mention;
     }
 
     final mentionPattern = RegExp(r'@(\w+)');
     final usedFiles = <String>{};
-
-    // Résout le nom original d'un fichier à partir d'une @mention (strict).
-    // Priorité : correspondance exacte (slug = mention), puis préfixe slug.
-    String resolveFileName(String mention) {
-      final needle = mention.toLowerCase();
-      // 1. Exact match on slug (name without extension, spaces→_)
-      for (final key in inlineMap.keys) {
-        final slug = key.replaceAll(' ', '_').replaceAll(RegExp(r'\.[^.]+$'), '').toLowerCase();
-        if (slug == needle) return key;
-      }
-      // 2. Full filename (with extension) match
-      for (final key in inlineMap.keys) {
-        if (key.toLowerCase() == needle) return key;
-      }
-      // 3. Slug starts with mention (e.g. @photo matches photo_001.jpg)
-      for (final key in inlineMap.keys) {
-        final slug = key.replaceAll(' ', '_').replaceAll(RegExp(r'\.[^.]+$'), '').toLowerCase();
-        if (slug.startsWith(needle)) return key;
-      }
-      return mention; // no match → keep the raw @mention text
-    }
-
     final contentBuf = StringBuffer();
     int lastEnd = 0;
     for (final match in mentionPattern.allMatches(text)) {
@@ -648,14 +643,19 @@ class GitHubService {
       if (beforeText.isNotEmpty) contentBuf.write(beforeText);
       final mentionKey = match.group(1)!;
       final fileName   = resolveFileName(mentionKey);
-      final inlineUrl  = inlineMap[fileName] ?? '';
-      if (inlineUrl.isNotEmpty) {
+      final url        = urlMap[fileName] ?? '';
+      if (url.isNotEmpty) {
         if (usedFiles.contains(fileName)) {
-          contentBuf.write('\n*[@$mentionKey — voir image ci-dessus]*\n');
+          contentBuf.write('\n*[@$mentionKey — voir ci-dessus]*\n');
         } else {
           usedFiles.add(fileName);
-          // data URI → image inline dans Claude/ChatGPT
-          contentBuf.write('\n\n![$fileName]($inlineUrl)\n\n');
+          final isImg = ['png','jpg','jpeg','gif','webp']
+              .contains(fileName.split('.').last.toLowerCase());
+          if (isImg) {
+            contentBuf.write('\n\n![$fileName]($url)\n\n');
+          } else {
+            contentBuf.write('\n\n[$fileName]($url)\n\n');
+          }
         }
       } else {
         contentBuf.write(match.group(0)!);
@@ -663,16 +663,14 @@ class GitHubService {
       lastEnd = match.end;
     }
     if (lastEnd < text.length) contentBuf.write(text.substring(lastEnd));
-    final inlineContent = contentBuf.toString().trim();
+    final mainContent = contentBuf.toString().trim();
 
-    // Fichiers non mentionnés → section "Pièces jointes" avec data URI aussi
-    final nonMentioned = inlineMap.entries.where((e) => !usedFiles.contains(e.key)).toList();
+    // Fichiers non mentionnés → annexés à la fin
+    final nonMentioned = urlMap.entries.where((e) => !usedFiles.contains(e.key)).toList();
 
-    // Build clean prompt content — no metadata block, no section headers
     final sb = StringBuffer();
-    if (inlineContent.isNotEmpty) sb.write(inlineContent);
+    if (mainContent.isNotEmpty) sb.write(mainContent);
 
-    // Non-mentioned attachments appended after the text
     if (nonMentioned.isNotEmpty) {
       if (sb.isNotEmpty) sb.write('\n\n');
       for (final e in nonMentioned) {
@@ -687,16 +685,36 @@ class GitHubService {
       }
     }
 
-    // Room context appended as a separator section (useful for the agent)
+    // Contexte room en bas du fichier (utile pour l'agent)
     if (roomContext != null && roomContext.trim().isNotEmpty) {
       sb.write('\n\n---\n\n## Contexte — ${room?.name ?? "Global"}\n\n');
       sb.write(roomContext.trim());
     }
 
+    final promptContent = sb.toString();
     final promptPath = 'prompts/$id.md';
-    final body = jsonEncode({'message': 'prompt: $id', 'content': base64Encode(utf8.encode(sb.toString()))});
+    final body = jsonEncode({'message': 'prompt: $id', 'content': base64Encode(utf8.encode(promptContent))});
     final r = await _client.put(Uri.parse('$_api/contents/$promptPath'), headers: _h, body: body);
     if (r.statusCode != 201 && r.statusCode != 200) throw Exception('Sauvegarde échouée: ${r.statusCode}');
+
+    // Si une room est assignée, copier aussi dans rooms/$roomId/prompt-$id.md
+    if (room != null) {
+      try {
+        final agentPrompt = AgentPrompt(
+          id: id,
+          number: 0,
+          roomId: room.id,
+          text: promptContent,
+          status: 'pending',
+          name: '',
+          createdAt: DateTime.now(),
+        );
+        await pushPrompt(room.id, agentPrompt);
+      } catch (_) {
+        // Non bloquant — la sauvegarde principale est déjà réussie
+      }
+    }
+
     return '$_raw/$promptPath';
   }
 
