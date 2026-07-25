@@ -3031,7 +3031,6 @@ class _GeminiImproveSheetState extends State<_GeminiImproveSheet> {
       ])),
     );
   }
-}
 
 // ── _FileChip ─────────────────────────────────────────────────────────────────
 class _FileChip extends StatelessWidget {
