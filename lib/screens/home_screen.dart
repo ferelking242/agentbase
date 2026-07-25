@@ -2146,15 +2146,6 @@ class _GeminiImproveSheetState extends State<_GeminiImproveSheet> {
     ),
   );
 }
-).firstMatch(before);
-    // Use base name without extension (spaces→_) to avoid dots in @mention
-    final dot = f.name.lastIndexOf('.');
-    final baseName = dot > 0 ? f.name.substring(0, dot) : f.name;
-    final mention = '@${baseName.replaceAll(' ', '_')}';
-    final newBefore = match != null ? before.substring(0, match.start) + mention : before + mention;
-    _ctrl.value = TextEditingValue(text: newBefore + after, selection: TextSelection.collapsed(offset: newBefore.length));
-    setState(() => _mentionQuery = null);
-  }
 
   void _insertOpenSpaceMention(Map<String, dynamic> img) {
     final pos = _ctrl.selection.baseOffset;
