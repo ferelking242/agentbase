@@ -177,7 +177,15 @@ class _HomeScreenState extends State<HomeScreen> {
     if (pos < 0) return;
     final before = _ctrl.text.substring(0, pos);
     final after  = _ctrl.text.substring(pos);
-    final match  = RegExp(r'@(\w*)
+    final match  = RegExp(r'@(\w*)$').firstMatch(before);
+    final mention = '@${f.name}';
+    final newBefore = match != null ? before.substring(0, match.start) + mention : before + mention;
+    _ctrl.value = TextEditingValue(
+      text: newBefore + after,
+      selection: TextSelection.collapsed(offset: newBefore.length),
+    );
+    setState(() { _mentionQuery = null; });
+  }
 
   void _insertOpenSpaceMention(Map<String, dynamic> img) {
     final pos = _ctrl.selection.baseOffset;
